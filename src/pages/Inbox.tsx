@@ -49,6 +49,30 @@ export default function Inbox() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Real-time subscriptions
+  useEffect(() => {
+    const convChannel = supabase
+      .channel("conversations-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
+        fetchConversations();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(convChannel); };
+  }, [activeFilter]);
+
+  useEffect(() => {
+    if (!selectedConv) return;
+    const msgChannel = supabase
+      .channel(`messages-${selectedConv.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${selectedConv.id}` }, (payload) => {
+        setMessages((prev) => [...prev, payload.new]);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(msgChannel); };
+  }, [selectedConv?.id]);
+
   const fetchConversations = async () => {
     let query = supabase
       .from("conversations")
