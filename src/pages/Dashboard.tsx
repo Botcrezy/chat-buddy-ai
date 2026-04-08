@@ -38,6 +38,42 @@ export default function Dashboard() {
         profiles: (profilesRes as any).count || 0,
       });
       setRecentConversations(convRes.data || []);
+
+      // Fetch weekly data
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - 6);
+      weekStart.setHours(0, 0, 0, 0);
+
+      const { data: weekMessages } = await supabase
+        .from("messages")
+        .select("created_at, sender_type")
+        .gte("created_at", weekStart.toISOString())
+        .order("created_at", { ascending: true });
+
+      if (weekMessages && weekMessages.length > 0) {
+        const dayMap: Record<number, { messages: number; ai: number }> = {};
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - 6 + i);
+          dayMap[d.getDay()] = { messages: 0, ai: 0 };
+        }
+        for (const msg of weekMessages) {
+          const dayIndex = new Date(msg.created_at).getDay();
+          if (dayMap[dayIndex]) {
+            dayMap[dayIndex].messages++;
+            if (msg.sender_type === "ai") dayMap[dayIndex].ai++;
+          }
+        }
+        const dayNames = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+        const chartData = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - 6 + i);
+          const idx = d.getDay();
+          chartData.push({ day: dayNames[idx], messages: dayMap[idx]?.messages || 0, ai: dayMap[idx]?.ai || 0 });
+        }
+        setWeeklyData(chartData);
+      }
     };
     fetchStats();
   }, []);
