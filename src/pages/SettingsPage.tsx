@@ -25,7 +25,8 @@ export default function SettingsPage() {
       working_hours_start: settings.working_hours_start,
       working_hours_end: settings.working_hours_end,
       off_hours_message: settings.off_hours_message,
-    }).eq("id", settings.id);
+      baileys_server_url: settings.baileys_server_url,
+    } as any).eq("id", settings.id);
     toast({ title: "تم حفظ الإعدادات ✅" });
     setSaving(false);
   };
@@ -69,6 +70,28 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Globe className="h-4 w-4 text-primary" /></div>
+            عنوان سيرفر Baileys
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>عنوان URL للسيرفر الخارجي</Label>
+            <Input
+              placeholder="https://your-server.up.railway.app"
+              dir="ltr"
+              className="font-mono text-sm"
+              value={settings?.baileys_server_url || ""}
+              onChange={(e) => setSettings({ ...settings, baileys_server_url: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">عنوان سيرفر Baileys الذي يشغل اتصال الواتساب</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Bell className="h-4 w-4 text-primary" /></div>
             الإشعارات
           </CardTitle>
@@ -87,22 +110,6 @@ export default function SettingsPage() {
               <Switch defaultChecked />
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Globe className="h-4 w-4 text-primary" /></div>
-            عنوان سيرفر Baileys
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>عنوان URL للسيرفر الخارجي</Label>
-            <Input placeholder="https://your-vps-ip:3001" dir="ltr" className="font-mono text-sm" />
-            <p className="text-xs text-muted-foreground">عنوان سيرفر Baileys الذي يشغل اتصال الواتساب</p>
-          </div>
         </CardContent>
       </Card>
 
