@@ -1,4 +1,3 @@
-import { corsHeaders } from "@anthropic-ai/sdk";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.102.1";
 
 const corsH = {
