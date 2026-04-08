@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Bot, Brain, Zap, MessageSquare, Plus, Trash2, TestTube,
   Send, BookOpen, Save, Loader2, RefreshCw, Clock, UserCog,
-  Database, Image, FileText, HelpCircle, Sparkles,
+  Database, Image, FileText, HelpCircle, Sparkles, Upload,
 } from "lucide-react";
 
 export default function BotSettings() {
@@ -28,6 +28,8 @@ export default function BotSettings() {
   const [testMessage, setTestMessage] = useState("");
   const [testResponse, setTestResponse] = useState("");
   const [testing, setTesting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [newQ, setNewQ] = useState({ question: "", answer: "", category: "general" });
   const [newQR, setNewQR] = useState({ title: "", content: "", category: "general" });
@@ -110,6 +112,24 @@ export default function BotSettings() {
     fetchAll();
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const fileName = `${Date.now()}.${ext}`;
+      const { data, error } = await supabase.storage.from("knowledge-media").upload(fileName, file);
+      if (error) throw error;
+      const { data: urlData } = supabase.storage.from("knowledge-media").getPublicUrl(fileName);
+      setNewKB({ ...newKB, media_url: urlData.publicUrl, media_type: "image" });
+      toast({ title: "تم رفع الصورة ✅" });
+    } catch (err: any) {
+      toast({ title: "فشل رفع الصورة ❌", description: err.message, variant: "destructive" });
+    }
+    setUploading(false);
+  };
+
   const addKnowledgeItem = async () => {
     if (!newKB.title || !newKB.content) return;
     await supabase.from("knowledge_base" as any).insert(newKB as any);
@@ -150,9 +170,9 @@ export default function BotSettings() {
   };
 
   const personalities = [
-    { label: "فريق المبيعات", value: "أنت عضو في فريق المبيعات. أسلوبك ودود ومقنع. تهتم بعرض المنتجات والخدمات وإقناع العميل بالشراء. تستخدم أسلوب محادثة طبيعي." },
-    { label: "الدعم الفني", value: "أنت عضو في فريق الدعم الفني. أسلوبك صبور ومتعاون. تساعد العملاء في حل مشاكلهم التقنية بشكل واضح ومبسط." },
-    { label: "خدمة العملاء", value: "أنت عضو في فريق خدمة العملاء. أسلوبك مهذب واحترافي. تجيب على الاستفسارات العامة وتوجه العملاء." },
+    { label: "مرام - خدمة العملاء", value: "أنتِ مرام، عضوة في فريق خدمة العملاء في Sity Cloud. بتتكلمي بالمصري العامي بشكل ودود واحترافي. بتفهمي طلبات العملاء وبتساعديهم ياخدوا القرار الصح." },
+    { label: "فريق المبيعات", value: "أنتِ مرام من فريق المبيعات في Sity Cloud. أسلوبك ودود ومقنع. بتهتمي بعرض المنتجات والخدمات وإقناع العميل. بتتكلمي مصري عامي." },
+    { label: "الدعم الفني", value: "أنتِ مرام من فريق الدعم الفني في Sity Cloud. أسلوبك صبور ومتعاون. بتساعدي العملاء يحلوا مشاكلهم التقنية بشكل واضح ومبسط. بتتكلمي مصري عامي." },
   ];
 
   const dataTypeIcons: Record<string, any> = {
@@ -177,7 +197,7 @@ export default function BotSettings() {
         </div>
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">إعدادات البوت</h1>
-          <p className="text-muted-foreground text-sm">تخصيص الذكاء الاصطناعي وقاعدة المعرفة</p>
+          <p className="text-muted-foreground text-sm">تخصيص مرام - مساعدة Sity Cloud الذكية</p>
         </div>
       </div>
 
@@ -204,7 +224,7 @@ export default function BotSettings() {
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">اسم البوت</Label>
-                <Input value={settings?.bot_name || ""} onChange={(e) => setSettings({ ...settings, bot_name: e.target.value })} className="bg-muted/30" />
+                <Input value={settings?.bot_name || ""} onChange={(e) => setSettings({ ...settings, bot_name: e.target.value })} className="bg-muted/30" placeholder="مرام" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">شخصية البوت</Label>
@@ -245,7 +265,7 @@ export default function BotSettings() {
           </Card>
         </TabsContent>
 
-        {/* Knowledge Base - NEW */}
+        {/* Knowledge Base */}
         <TabsContent value="knowledge" className="space-y-4 mt-4">
           <Card className="border-0 shadow-md">
             <CardHeader>
@@ -257,7 +277,7 @@ export default function BotSettings() {
                     </div>
                     قاعدة المعرفة
                   </CardTitle>
-                  <CardDescription>درّب البوت على بيانات شركتك بالتفصيل ({knowledgeBase.length} عنصر)</CardDescription>
+                  <CardDescription>درّب مرام على بيانات شركتك بالتفصيل ({knowledgeBase.length} عنصر)</CardDescription>
                 </div>
                 <Dialog open={showAddKB} onOpenChange={setShowAddKB}>
                   <DialogTrigger asChild>
@@ -292,7 +312,15 @@ export default function BotSettings() {
                       </div>
                       {(newKB.data_type === "image") && (
                         <div className="space-y-1.5">
-                          <Label className="font-semibold">رابط الصورة</Label>
+                          <Label className="font-semibold">صورة المنتج</Label>
+                          <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
+                          <div className="flex gap-2">
+                            <Button type="button" variant="outline" className="gap-2 flex-1 rounded-xl" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                              {uploading ? "جاري الرفع..." : "رفع صورة"}
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">أو أدخل رابط مباشر:</p>
                           <Input value={newKB.media_url} onChange={(e) => setNewKB({ ...newKB, media_url: e.target.value, media_type: "image" })} className="bg-muted/30" placeholder="https://example.com/product.jpg" dir="ltr" />
                           {newKB.media_url && (
                             <div className="mt-2 rounded-xl overflow-hidden border bg-muted/20">
@@ -316,7 +344,7 @@ export default function BotSettings() {
                     <Database className="h-8 w-8 opacity-40" />
                   </div>
                   <p className="font-bold text-base mb-1">قاعدة المعرفة فارغة</p>
-                  <p className="text-xs max-w-sm mx-auto">أضف بيانات شركتك ومنتجاتك وخدماتك لتدريب البوت على الرد باحترافية</p>
+                  <p className="text-xs max-w-sm mx-auto">أضف بيانات شركتك ومنتجاتك وخدماتك لتدريب مرام على الرد باحترافية</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -558,13 +586,13 @@ export default function BotSettings() {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center"><TestTube className="h-4.5 w-4.5 text-primary" /></div>
-                اختبار البوت
+                اختبار مرام
               </CardTitle>
-              <CardDescription>جرب البوت قبل تشغيله على الواتساب</CardDescription>
+              <CardDescription>جرب مرام قبل تشغيلها على الواتساب</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="rounded-2xl border bg-[hsl(var(--whatsapp-chat-bg))] p-4 mb-4 min-h-[200px] space-y-3">
-                {!testResponse && !testing && <p className="text-center text-sm text-muted-foreground pt-16">ابدأ بإرسال رسالة لاختبار البوت</p>}
+                {!testResponse && !testing && <p className="text-center text-sm text-muted-foreground pt-16">ابدأ بإرسال رسالة لاختبار مرام</p>}
                 {testMessage && (testResponse || testing) && (
                   <div className="flex justify-end">
                     <div className="bg-white px-3 py-2 rounded-2xl rounded-tr-md text-sm max-w-[80%] shadow-sm">{testMessage}</div>
@@ -572,13 +600,16 @@ export default function BotSettings() {
                 )}
                 {testing && (
                   <div className="flex justify-start">
-                    <div className="bg-[hsl(var(--message-out))] px-3 py-2 rounded-2xl rounded-tl-md text-sm shadow-sm"><Loader2 className="h-4 w-4 animate-spin" /></div>
+                    <div className="bg-[hsl(var(--message-out))] px-3 py-2 rounded-2xl rounded-tl-md text-sm shadow-sm">
+                      <span className="text-xs text-muted-foreground">مرام بتكتب...</span>
+                      <Loader2 className="h-4 w-4 animate-spin inline mr-1" />
+                    </div>
                   </div>
                 )}
                 {testResponse && (
                   <div className="flex justify-start">
                     <div className="bg-[hsl(var(--message-out))] px-3 py-2 rounded-2xl rounded-tl-md text-sm max-w-[80%] shadow-sm">
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground mb-1"><Bot className="h-3 w-3" /> AI</div>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground mb-1"><Bot className="h-3 w-3" /> مرام</div>
                       {testResponse}
                     </div>
                   </div>

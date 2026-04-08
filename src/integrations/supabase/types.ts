@@ -767,6 +767,42 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_profiles: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          is_default: boolean
+          name: string
+          phone_number: string | null
+          server_url: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name: string
+          phone_number?: string | null
+          server_url: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_default?: boolean
+          name?: string
+          phone_number?: string | null
+          server_url?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_sessions: {
         Row: {
           connected_at: string | null
