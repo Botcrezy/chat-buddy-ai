@@ -295,10 +295,26 @@ async function startSocket() {
           media_type: mediaType,
         });
 
-        if (result?.ai_reply) {
+        if (result?.ai_reply || result?.ai_media_url) {
           try {
-            await sock.sendMessage(msg.key.remoteJid, { text: result.ai_reply });
-            addLog('info', `🤖 AI Reply sent to ${phone}`);
+            // Send image first if present
+            if (result.ai_media_url) {
+              try {
+                await sock.sendMessage(msg.key.remoteJid, {
+                  image: { url: result.ai_media_url },
+                  caption: result.ai_reply || '',
+                });
+                addLog('info', `🖼️ AI Image + Reply sent to ${phone}`);
+              } catch (imgErr) {
+                addLog('error', 'Image send failed, sending text only', imgErr.message);
+                if (result.ai_reply) {
+                  await sock.sendMessage(msg.key.remoteJid, { text: result.ai_reply });
+                }
+              }
+            } else if (result.ai_reply) {
+              await sock.sendMessage(msg.key.remoteJid, { text: result.ai_reply });
+              addLog('info', `🤖 AI Reply sent to ${phone}`);
+            }
           } catch (e) {
             addLog('error', 'Send reply error', e.message);
           }
