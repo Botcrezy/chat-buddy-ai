@@ -226,7 +226,7 @@ ${quickRepliesText || "لا يوجد"}
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: chatMessages,
-      max_tokens: 1000,
+      max_tokens: 400,
     }),
   });
 
