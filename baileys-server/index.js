@@ -114,6 +114,8 @@ async function sendWebhook(data) {
   }
 }
 
+let noQrAttempts = 0;
+
 async function startSocket() {
   if (isConnecting) {
     addLog('warn', 'Already connecting, skipping duplicate startSocket call');
@@ -121,31 +123,28 @@ async function startSocket() {
   }
   isConnecting = true;
   reconnectAttempts++;
+  noQrAttempts++;
   const authInfo = getAuthInfo();
-  addLog('info', '🔄 Starting WhatsApp socket...', { authInfo, attempt: reconnectAttempts });
+  addLog('info', '🔄 Starting WhatsApp socket...', { authInfo, attempt: reconnectAttempts, noQrAttempts });
   await updateStatus({ status: 'starting', qr_code: null });
 
-  // Auto-reset after too many failed attempts without QR
-  if (reconnectAttempts > 5 && authInfo.hasCreds) {
-    addLog('warn', `⚠️ ${reconnectAttempts} failed attempts. Session likely corrupted. Auto-resetting...`);
+  // Auto-reset after 3 attempts without ever getting a QR
+  if (noQrAttempts > 3) {
+    addLog('warn', `⚠️ ${noQrAttempts} attempts without QR. Clearing session and retrying fresh...`);
     try {
       fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-      addLog('info', '🗑️ Auto-cleared corrupted auth_session');
+      addLog('info', '🗑️ Auto-cleared auth_session for fresh start');
     } catch (e) {
       addLog('error', 'Failed to auto-clear session', e.message);
     }
-    reconnectAttempts = 0;
+    noQrAttempts = 0;
   }
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     addLog('info', 'Auth state loaded', { authDir: AUTH_DIR, hasCredsFile: getAuthInfo().hasCreds });
 
-    const { version } = await fetchLatestBaileysVersion();
-    addLog('info', `Baileys version: ${version.join('.')}`);
-
     sock = makeWASocket({
-      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -153,7 +152,11 @@ async function startSocket() {
       logger,
       printQRInTerminal: true,
       generateHighQualityLinkPreview: true,
-      browser: ['WhatsApp Bot', 'Chrome', '120.0.0'],
+      browser: Browsers.ubuntu('WhatsApp Bot'),
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      connectTimeoutMs: 60000,
+      retryRequestDelayMs: 500,
     });
 
     sock.ev.on('creds.update', saveCreds);
