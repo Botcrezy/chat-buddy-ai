@@ -196,12 +196,15 @@ async function startSocket() {
         isConnecting = false;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-        addLog('info', `Connection closed. Code: ${statusCode}, Reconnecting: ${shouldReconnect}, Attempts: ${reconnectAttempts}`);
+        addLog('info', `Connection closed. Code: ${statusCode}, Reconnecting: ${shouldReconnect}, Attempts: ${reconnectAttempts}`, {
+          errorMessage: disconnectError?.message,
+          errorStack: disconnectError?.stack?.slice(0, 300),
+        });
         await updateStatus({ status: 'disconnected' });
 
         if (shouldReconnect) {
-          const delay = statusCode === 515 ? 30000 : 10000;
-          addLog('info', `Reconnecting in ${delay / 1000}s...`);
+          const delay = Math.min(10000 * Math.pow(2, reconnectAttempts - 1), 120000);
+          addLog('info', `Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})...`);
           setTimeout(startSocket, delay);
         } else {
           addLog('warn', '⚠️ Logged out! Use /reset-session to clear and re-scan QR');
