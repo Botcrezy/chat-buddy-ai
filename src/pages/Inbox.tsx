@@ -188,7 +188,7 @@ export default function Inbox() {
               <div className="h-24 w-24 rounded-3xl bg-primary/5 flex items-center justify-center mx-auto mb-5">
                 <MessageSquare className="h-12 w-12 text-primary/30" />
               </div>
-              <h3 className="font-bold text-xl mb-2">واتساب بوت</h3>
+              <h3 className="font-bold text-xl mb-2">Sity Cloud Bot</h3>
               <p className="text-sm">اختر محادثة من القائمة للبدء</p>
             </div>
           </div>
