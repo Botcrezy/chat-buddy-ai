@@ -140,12 +140,17 @@ export default function Dashboard() {
                     <stop offset="0%" stopColor="hsl(142, 70%, 35%)" stopOpacity={0.3} />
                     <stop offset="100%" stopColor="hsl(142, 70%, 35%)" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="aiGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(262, 70%, 50%)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="hsl(262, 70%, 50%)" stopOpacity={0} />
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="day" className="text-xs" tick={{ fontSize: 11 }} />
                 <YAxis className="text-xs" tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={{ borderRadius: 16, border: "1px solid hsl(140, 15%, 88%)", fontSize: 13, direction: "rtl" }} />
                 <Area type="monotone" dataKey="messages" stroke="hsl(142, 70%, 35%)" fill="url(#msgGradient)" strokeWidth={2.5} name="الرسائل" />
+                <Area type="monotone" dataKey="ai" stroke="hsl(262, 70%, 50%)" fill="url(#aiGradient)" strokeWidth={2} name="ردود مرام" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
