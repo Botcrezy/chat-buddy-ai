@@ -179,7 +179,8 @@ async function startSocket() {
 
       if (qr) {
         qrCode = qr;
-        reconnectAttempts = 0; // QR generated = session is working
+        reconnectAttempts = 0;
+        noQrAttempts = 0; // QR generated = connection is working
         addLog('info', '📱 QR Code generated - scan with WhatsApp');
 
         try {
