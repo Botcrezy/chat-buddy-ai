@@ -1,136 +1,175 @@
+# خطة تطوير شاملة للنظام - ميزات متقدمة
 
+## ملخص
 
-# خطة بناء نظام إدارة رسائل واتساب مع AI
+تحسين النظام بإضافة: ذاكرة عملاء قوية، قراءة بروفايل الواتساب، دعم الصور والميديا، رسائل جماعية (Broadcast)، متابعة تلقائية للعملاء، وشخصية بوت بشرية متقدمة. مع شرح تفصيلي لنشر سيرفر Baileys.
 
-## الهيكل العام
+---
 
-```text
-┌─────────────────────────────────────────────┐
-│           Admin Dashboard (Lovable)          │
-│  Dashboard │ Inbox │ AI Bot │ Contacts │ QR  │
-└──────────────────┬──────────────────────────┘
-                   │ Webhooks / API
-┌──────────────────▼──────────────────────────┐
-│     External VPS (Oracle Free Tier)          │
-│  Baileys (WhatsApp) ←→ Node.js Server       │
-│  AI Engine (Lovable AI Gateway)              │
-└─────────────────────────────────────────────┘
+## المرحلة 1: قاعدة البيانات - جداول جديدة
+
+### جدول `customer_memory` - ذاكرة العملاء
+
+```sql
+- contact_id (uuid, FK → contacts)
+- memory_type: 'preference' | 'complaint' | 'interest' | 'order' | 'note'
+- key (text) -- مثل "المنتج المفضل"
+- value (text) -- مثل "باقة بريميوم"
+- extracted_from_message_id (uuid, nullable)
+- created_by: 'ai' | 'agent'
 ```
 
-## ملاحظة تقنية مهمة
+### جدول `broadcast_campaigns` - الرسائل الجماعية
 
-Baileys تحتاج Node.js server يشتغل 24/7. Lovable بيبني frontend فقط. الحل:
-- **لوحة التحكم (Dashboard)**: تتبني هنا في Lovable بالكامل
-- **سيرفر Baileys**: يتشغل على VPS مجاني (Oracle Free Tier) ويتواصل مع اللوحة عبر Edge Functions
-- **AI**: يستخدم Lovable AI Gateway (مجاني) عبر Edge Function
-- **Database**: Supabase PostgreSQL (متصل بالفعل)
+```sql
+- title, content, media_url, media_type
+- target_category (text) -- فلتر الفئة المستهدفة
+- status: 'draft' | 'sending' | 'completed'
+- total_recipients, sent_count, failed_count
+- scheduled_at (nullable), sent_at
+```
 
----
+### جدول `broadcast_recipients` - تفاصيل الإرسال
 
-## المرحلة 1: قاعدة البيانات
+```sql
+- campaign_id, contact_id
+- status: 'pending' | 'sent' | 'failed'
+- sent_at, error_message
+```
 
-إنشاء الجداول التالية في Supabase:
+### جدول `followup_rules` - قواعد المتابعة التلقائية
 
-- **whatsapp_sessions** - حالة اتصال الواتساب (session_id, status, phone_number, qr_code, connected_at)
-- **contacts** - جهات الاتصال (phone, name, category, notes, last_message_at)
-- **conversations** - المحادثات (contact_id, status [new/open/closed/waiting], assigned_to, is_ai_active)
-- **messages** - الرسائل (conversation_id, content, direction [in/out], sender_type [customer/ai/agent], timestamp)
-- **bot_settings** - إعدادات البوت (bot_name, personality, auto_reply_enabled, welcome_message, working_hours)
-- **training_data** - بيانات تدريب AI (category, question, answer)
-- **quick_replies** - ردود جاهزة (title, content, category)
+```sql
+- name, trigger_type: 'no_reply' | 'after_purchase' | 'periodic'
+- delay_hours (int), message_template (text)
+- is_active (boolean), target_category
+```
 
-مع RLS policies مناسبة (admin فقط يقدر يوصل للبيانات).
+### تعديل جدول `contacts`
 
----
+- إضافة: `whatsapp_name`, `whatsapp_about`, `whatsapp_avatar_url`, `summary` (ملخص AI للعميل)
 
-## المرحلة 2: لوحة التحكم (Frontend)
+### تعديل جدول `messages`
 
-### Layout
-- Sidebar عربي RTL مع أيقونات للتنقل
-- ألوان خضراء (ثيم واتساب)
-- متجاوب مع الموبايل
-
-### الصفحات:
-
-**1. Dashboard (الرئيسية)**
-- إحصائيات: رسائل اليوم، عملاء نشطين، معدل رد AI، حالة الاتصال
-- رسم بياني للرسائل (أسبوعي)
-- أحدث المحادثات
-
-**2. Inbox (المحادثات)**
-- قائمة محادثات على اليسار مع بحث وفلاتر
-- نافذة شات على اليمين (شكل واتساب)
-- إمكانية الرد يدوي
-- زر تحويل من AI لموظف والعكس
-- علامات ملونة (VIP، شكوى، استفسار)
-
-**3. AI Bot Settings (إعدادات البوت)**
-- تشغيل/إيقاف الرد التلقائي
-- إضافة بيانات تدريب (سؤال وجواب)
-- تعديل شخصية البوت
-- ردود جاهزة ذكية
-- اختبار البوت من اللوحة
-
-**4. Contacts (جهات الاتصال)**
-- جدول بالعملاء مع بحث وتصنيفات
-- صفحة تفاصيل كل عميل مع سجل محادثاته
-- استيراد/تصدير CSV
-
-**5. WhatsApp Connection (الاتصال)**
-- عرض QR Code
-- حالة الاتصال (متصل/غير متصل)
-- زر إعادة اتصال
-- معلومات الرقم المتصل
-
-**6. Settings (الإعدادات)**
-- رسالة ترحيب
-- أوقات العمل
-- إعدادات الإشعارات
+- التأكد من دعم `media_url` و `media_type` (موجودين بالفعل)
 
 ---
 
-## المرحلة 3: Edge Functions
+## المرحلة 2: Edge Function - `whatsapp-webhook` محسّن
 
-**1. `whatsapp-webhook`** - يستقبل الرسائل من سيرفر Baileys ويخزنها في DB
-**2. `ai-reply`** - يستخدم Lovable AI Gateway للرد على الرسائل بناءً على training data
-**3. `send-message`** - يبعت رسالة للعميل عبر سيرفر Baileys
-**4. `whatsapp-status`** - يجيب حالة الاتصال و QR code من السيرفر الخارجي
+التغييرات الرئيسية:
+
+1. **استقبال بيانات البروفايل** من Baileys (الاسم، الصورة، الحالة) وتخزينها في contacts
+2. **استقبال الصور والملفات** - حفظ media_url و media_type في الرسائل
+3. **ذاكرة عملاء ذكية** - بعد كل رد AI، يستخرج معلومات مهمة من المحادثة ويحفظها في `customer_memory`
+4. **System Prompt محسّن** يشمل:
+  - شخصية البوت (مبيعات/دعم فني) بأسلوب بشري طبيعي
+  - ذاكرة العميل السابقة كاملة
+  - ملخص العميل
+  - تعليمات عدم إظهار أنه بوت
+  - تاريخ المحادثة (آخر 50 رسالة بدل 20)
+
+### System Prompt المحسّن:
+
+```
+أنت {bot_name}، أحد أعضاء فريق {personality}.
+لا تقل أبداً أنك ذكاء اصطناعي أو بوت.
+رد كأنك شخص حقيقي بأسلوب طبيعي ودود.
+
+معلومات عن العميل {contact_name}:
+- {customer_memory entries}
+- ملخص: {contact.summary}
+
+بيانات الشركة: {training_data}
+ردود جاهزة: {quick_replies}
+
+إذا سُئلت عن شيء لا تعرفه: قل "خليني أتأكد من الزملاء وأرجعلك"
+```
 
 ---
 
-## المرحلة 4: سيرفر Baileys الخارجي (VPS)
+## المرحلة 3: Edge Function جديدة - `broadcast-send`
 
-هذا الجزء يتشغل خارج Lovable على VPS مجاني. هنوفر لك الكود الكامل:
-- اتصال Baileys مع QR code
-- webhook يبعت الرسائل الجديدة لـ Edge Function
-- API لاستقبال أوامر الإرسال من اللوحة
-- session management
+- تستقبل campaign_id
+- تجلب العملاء المستهدفين (حسب الفلتر)
+- تبعت الرسائل عبر سيرفر Baileys واحدة واحدة مع delay
+- تحدّث حالة كل recipient
+
+---
+
+## المرحلة 4: Edge Function جديدة - `followup-check`
+
+- يتم استدعاؤها دورياً (Cron أو من Baileys server)
+- تفحص العملاء اللي محتاجين متابعة حسب `followup_rules`
+- تبعت رسائل المتابعة تلقائياً
+
+---
+
+## المرحلة 5: Frontend - صفحات جديدة ومحسّنة
+
+### 1. صفحة Inbox محسّنة
+
+- عرض صور الميديا في الشات
+- زر إرفاق صورة/ملف
+- لوحة جانبية لبيانات العميل (بروفايل واتساب + ذاكرة + ملخص)
+
+### 2. صفحة Broadcast جديدة
+
+- إنشاء حملة رسائل جماعية
+- اختيار الفئة المستهدفة
+- إرفاق صورة
+- متابعة حالة الإرسال (progress bar)
+
+### 3. صفحة Contacts محسّنة
+
+- عرض صورة البروفايل من واتساب
+- عرض ملخص AI للعميل
+- عرض ذاكرة العميل (تفضيلاته، اهتماماته)
+
+### 4. صفحة Bot Settings محسّنة
+
+- إضافة تبويب "المتابعة التلقائية" لإعداد followup_rules
+- إضافة تبويب "الشخصيات" لاختيار نوع الشخصية (مبيعات/دعم/عام)
+
+### 5. إضافة رابط Broadcast في الـ Sidebar
+
+---
+
+## المرحلة 6: تحديث سيرفر Baileys
+
+إضافة في `baileys-server/index.js`:
+
+1. **إرسال بيانات البروفايل** مع كل رسالة (pushName, profilePicUrl, status)
+2. **استقبال الصور** وتحويلها لـ base64 أو رفعها وإرسال الرابط
+3. **API endpoint `/broadcast**` لاستقبال أوامر الإرسال الجماعي مع delay بين الرسائل
+4. **Cron job** لاستدعاء `followup-check` كل ساعة
+
+---
+
+## المرحلة 7: شرح تفصيلي لنشر سيرفر Baileys
+
+سيتم إنشاء ملف `DEPLOYMENT_GUIDE.md` شامل يتضمن:
+
+1. **إنشاء  مجاني** على reilway(خطوة بخطوة)
+2. **رفع الكود**
+3. **ضبط المتغيرات**: ملف `.env` مع:
+  - `SUPABASE_URL` و `SUPABASE_ANON_KEY`
+  - `WEBHOOK_URL` = `https://mobxdcedtckzvusazdjg.supabase.co/functions/v1/whatsapp-webhook`
+  - `STATUS_URL` = `https://mobxdcedtckzvusazdjg.supabase.co/functions/v1/whatsapp-status`
+4. **التشغيل**
+5. **الربط من اللوحة**: إدخال `http://reilway.api.com` في صفحة الإعدادات
+6. **مسح QR Code** من صفحة الاتصال
 
 ---
 
 ## ترتيب التنفيذ
 
-1. إنشاء جداول قاعدة البيانات + RLS
-2. بناء Layout + Sidebar + Routing
-3. صفحة Dashboard بإحصائيات
-4. صفحة Inbox (المحادثات) 
-5. صفحة AI Bot Settings + Training Data
-6. صفحة Contacts
-7. صفحة WhatsApp Connection (QR)
-8. Edge Functions (webhook, ai-reply, send-message)
-9. صفحة Settings
-10. كود سيرفر Baileys الخارجي
-
----
-
-## التقنيات المستخدمة (كلها مجانية)
-
-| المكون | التقنية |
-|--------|---------|
-| Frontend | React + Tailwind (Lovable) |
-| Database | Supabase PostgreSQL (متصل) |
-| AI | Lovable AI Gateway |
-| WhatsApp | Baileys على VPS خارجي |
-| Auth | Supabase Auth (موجود) |
-| Hosting VPS | Oracle Cloud Free Tier |
-
+1. Migration: جداول جديدة + تعديل contacts
+2. تحديث `whatsapp-webhook` (بروفايل + ذاكرة + prompt محسّن + ميديا)
+3. إنشاء `broadcast-send` edge function
+4. إنشاء `followup-check` edge function
+5. تحديث Inbox (ميديا + لوحة عميل جانبية)
+6. إنشاء صفحة Broadcast
+7. تحديث Contacts + Bot Settings
+8. تحديث كود Baileys server
+9. إنشاء DEPLOYMENT_GUIDE.md
