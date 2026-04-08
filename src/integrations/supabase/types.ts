@@ -58,6 +58,131 @@ export type Database = {
           },
         ]
       }
+      bot_settings: {
+        Row: {
+          auto_reply_enabled: boolean
+          bot_name: string
+          created_at: string
+          id: string
+          off_hours_message: string | null
+          personality: string | null
+          updated_at: string
+          welcome_message: string | null
+          working_hours_end: string | null
+          working_hours_start: string | null
+        }
+        Insert: {
+          auto_reply_enabled?: boolean
+          bot_name?: string
+          created_at?: string
+          id?: string
+          off_hours_message?: string | null
+          personality?: string | null
+          updated_at?: string
+          welcome_message?: string | null
+          working_hours_end?: string | null
+          working_hours_start?: string | null
+        }
+        Update: {
+          auto_reply_enabled?: boolean
+          bot_name?: string
+          created_at?: string
+          id?: string
+          off_hours_message?: string | null
+          personality?: string | null
+          updated_at?: string
+          welcome_message?: string | null
+          working_hours_end?: string | null
+          working_hours_start?: string | null
+        }
+        Relationships: []
+      }
+      contacts: {
+        Row: {
+          avatar_url: string | null
+          category: string
+          created_at: string
+          id: string
+          last_message_at: string | null
+          name: string | null
+          notes: string | null
+          phone: string
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          category?: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          name?: string | null
+          notes?: string | null
+          phone: string
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          category?: string
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          name?: string | null
+          notes?: string | null
+          phone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      conversations: {
+        Row: {
+          assigned_to: string | null
+          contact_id: string
+          created_at: string
+          id: string
+          is_ai_active: boolean
+          labels: string[] | null
+          last_message: string | null
+          last_message_at: string | null
+          status: string
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          contact_id: string
+          created_at?: string
+          id?: string
+          is_ai_active?: boolean
+          labels?: string[] | null
+          last_message?: string | null
+          last_message_at?: string | null
+          status?: string
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          contact_id?: string
+          created_at?: string
+          id?: string
+          is_ai_active?: boolean
+          labels?: string[] | null
+          last_message?: string | null
+          last_message_at?: string | null
+          status?: string
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       courses: {
         Row: {
           category: string
@@ -163,6 +288,53 @@ export type Database = {
         }
         Relationships: []
       }
+      messages: {
+        Row: {
+          content: string | null
+          conversation_id: string
+          created_at: string
+          direction: string
+          id: string
+          is_read: boolean
+          media_type: string | null
+          media_url: string | null
+          sender_type: string
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          content?: string | null
+          conversation_id: string
+          created_at?: string
+          direction?: string
+          id?: string
+          is_read?: boolean
+          media_type?: string | null
+          media_url?: string | null
+          sender_type?: string
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          content?: string | null
+          conversation_id?: string
+          created_at?: string
+          direction?: string
+          id?: string
+          is_read?: boolean
+          media_type?: string | null
+          media_url?: string | null
+          sender_type?: string
+          whatsapp_message_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -223,6 +395,36 @@ export type Database = {
         }
         Relationships: []
       }
+      quick_replies: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          id: string
+          title: string
+          updated_at: string
+          usage_count: number
+        }
+        Insert: {
+          category?: string
+          content: string
+          created_at?: string
+          id?: string
+          title: string
+          updated_at?: string
+          usage_count?: number
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          id?: string
+          title?: string
+          updated_at?: string
+          usage_count?: number
+        }
+        Relationships: []
+      }
       retreats: {
         Row: {
           created_at: string
@@ -280,6 +482,36 @@ export type Database = {
         }
         Relationships: []
       }
+      training_data: {
+        Row: {
+          answer: string
+          category: string
+          created_at: string
+          id: string
+          is_active: boolean
+          question: string
+          updated_at: string
+        }
+        Insert: {
+          answer: string
+          category?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          question: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: string
+          category?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          question?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -295,6 +527,39 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      whatsapp_sessions: {
+        Row: {
+          connected_at: string | null
+          created_at: string
+          id: string
+          phone_number: string | null
+          qr_code: string | null
+          session_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          phone_number?: string | null
+          qr_code?: string | null
+          session_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          phone_number?: string | null
+          qr_code?: string | null
+          session_id?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
