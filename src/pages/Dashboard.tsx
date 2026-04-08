@@ -10,7 +10,7 @@ const weekDaysInit = ["السبت", "الأحد", "الاثنين", "الثلا�
 export default function Dashboard() {
   const [stats, setStats] = useState({ messages: 0, contacts: 0, aiReplies: 0, connected: false, knowledgeItems: 0, memories: 0, profiles: 0 });
   const [recentConversations, setRecentConversations] = useState<any[]>([]);
-  const [weeklyData, setWeeklyData] = useState(weekDays.map(d => ({ day: d, messages: 0, ai: 0 })));
+  const [weeklyData, setWeeklyData] = useState(weekDaysInit.map(d => ({ day: d, messages: 0, ai: 0 })));
 
   useEffect(() => {
     const fetchStats = async () => {
