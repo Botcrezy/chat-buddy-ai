@@ -97,6 +97,102 @@ export type Database = {
         }
         Relationships: []
       }
+      broadcast_campaigns: {
+        Row: {
+          content: string
+          created_at: string
+          failed_count: number
+          id: string
+          media_type: string | null
+          media_url: string | null
+          scheduled_at: string | null
+          sent_at: string | null
+          sent_count: number
+          status: string
+          target_category: string | null
+          title: string
+          total_recipients: number
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          failed_count?: number
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          scheduled_at?: string | null
+          sent_at?: string | null
+          sent_count?: number
+          status?: string
+          target_category?: string | null
+          title: string
+          total_recipients?: number
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          failed_count?: number
+          id?: string
+          media_type?: string | null
+          media_url?: string | null
+          scheduled_at?: string | null
+          sent_at?: string | null
+          sent_count?: number
+          status?: string
+          target_category?: string | null
+          title?: string
+          total_recipients?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      broadcast_recipients: {
+        Row: {
+          campaign_id: string
+          contact_id: string
+          created_at: string
+          error_message: string | null
+          id: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          campaign_id: string
+          contact_id: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          campaign_id?: string
+          contact_id?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_recipients_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "broadcast_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           avatar_url: string | null
@@ -107,7 +203,11 @@ export type Database = {
           name: string | null
           notes: string | null
           phone: string
+          summary: string | null
           updated_at: string
+          whatsapp_about: string | null
+          whatsapp_avatar_url: string | null
+          whatsapp_name: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -118,7 +218,11 @@ export type Database = {
           name?: string | null
           notes?: string | null
           phone: string
+          summary?: string | null
           updated_at?: string
+          whatsapp_about?: string | null
+          whatsapp_avatar_url?: string | null
+          whatsapp_name?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -129,7 +233,11 @@ export type Database = {
           name?: string | null
           notes?: string | null
           phone?: string
+          summary?: string | null
           updated_at?: string
+          whatsapp_about?: string | null
+          whatsapp_avatar_url?: string | null
+          whatsapp_name?: string | null
         }
         Relationships: []
       }
@@ -242,6 +350,93 @@ export type Database = {
           start_date?: string | null
           title_ar?: string
           title_en?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      customer_memory: {
+        Row: {
+          contact_id: string
+          created_at: string
+          created_by: string
+          extracted_from_message_id: string | null
+          id: string
+          key: string
+          memory_type: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          created_by?: string
+          extracted_from_message_id?: string | null
+          id?: string
+          key: string
+          memory_type?: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          created_by?: string
+          extracted_from_message_id?: string | null
+          id?: string
+          key?: string
+          memory_type?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_memory_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_memory_extracted_from_message_id_fkey"
+            columns: ["extracted_from_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      followup_rules: {
+        Row: {
+          created_at: string
+          delay_hours: number
+          id: string
+          is_active: boolean
+          message_template: string
+          name: string
+          target_category: string | null
+          trigger_type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delay_hours?: number
+          id?: string
+          is_active?: boolean
+          message_template: string
+          name: string
+          target_category?: string | null
+          trigger_type?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delay_hours?: number
+          id?: string
+          is_active?: boolean
+          message_template?: string
+          name?: string
+          target_category?: string | null
+          trigger_type?: string
           updated_at?: string
         }
         Relationships: []
