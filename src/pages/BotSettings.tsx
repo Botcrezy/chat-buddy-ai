@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,9 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import {
   Bot,
   Brain,
@@ -17,62 +20,151 @@ import {
   TestTube,
   Send,
   BookOpen,
+  Save,
+  Loader2,
+  Pencil,
 } from "lucide-react";
 
 export default function BotSettings() {
-  const [autoReply, setAutoReply] = useState(true);
+  const { toast } = useToast();
+  const [settings, setSettings] = useState<any>(null);
+  const [trainingData, setTrainingData] = useState<any[]>([]);
+  const [quickReplies, setQuickReplies] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
   const [testMessage, setTestMessage] = useState("");
+  const [testResponse, setTestResponse] = useState("");
+  const [testing, setTesting] = useState(false);
+
+  // New item forms
+  const [newQ, setNewQ] = useState({ question: "", answer: "", category: "general" });
+  const [newQR, setNewQR] = useState({ title: "", content: "", category: "general" });
+  const [showAddTraining, setShowAddTraining] = useState(false);
+  const [showAddReply, setShowAddReply] = useState(false);
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
+
+  const fetchAll = async () => {
+    const [s, t, q] = await Promise.all([
+      supabase.from("bot_settings").select("*").limit(1).single(),
+      supabase.from("training_data").select("*").order("created_at", { ascending: false }),
+      supabase.from("quick_replies").select("*").order("usage_count", { ascending: false }),
+    ]);
+    setSettings(s.data);
+    setTrainingData(t.data || []);
+    setQuickReplies(q.data || []);
+  };
+
+  const saveSettings = async () => {
+    if (!settings) return;
+    setSaving(true);
+    await supabase.from("bot_settings").update(settings).eq("id", settings.id);
+    toast({ title: "تم حفظ الإعدادات ✅" });
+    setSaving(false);
+  };
+
+  const addTraining = async () => {
+    if (!newQ.question || !newQ.answer) return;
+    await supabase.from("training_data").insert(newQ);
+    setNewQ({ question: "", answer: "", category: "general" });
+    setShowAddTraining(false);
+    fetchAll();
+    toast({ title: "تمت الإضافة ✅" });
+  };
+
+  const deleteTraining = async (id: string) => {
+    await supabase.from("training_data").delete().eq("id", id);
+    fetchAll();
+  };
+
+  const addQuickReply = async () => {
+    if (!newQR.title || !newQR.content) return;
+    await supabase.from("quick_replies").insert(newQR);
+    setNewQR({ title: "", content: "", category: "general" });
+    setShowAddReply(false);
+    fetchAll();
+    toast({ title: "تمت الإضافة ✅" });
+  };
+
+  const deleteQuickReply = async (id: string) => {
+    await supabase.from("quick_replies").delete().eq("id", id);
+    fetchAll();
+  };
+
+  const testBot = async () => {
+    if (!testMessage.trim()) return;
+    setTesting(true);
+    setTestResponse("");
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/whatsapp-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
+        body: JSON.stringify({ phone: "test_user", name: "اختبار", message: testMessage }),
+      });
+      const data = await res.json();
+      setTestResponse(data.ai_reply || "لم يتم الحصول على رد");
+    } catch {
+      setTestResponse("حدث خطأ في الاختبار");
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-6" dir="rtl">
       <div>
         <h1 className="text-2xl font-bold">إعدادات البوت</h1>
-        <p className="text-muted-foreground text-sm">تخصيص سلوك الرد التلقائي والذكاء الاصطناعي</p>
+        <p className="text-muted-foreground text-sm">تخصيص الرد التلقائي والذكاء الاصطناعي</p>
       </div>
 
       <Tabs defaultValue="general" dir="rtl">
-        <TabsList className="grid grid-cols-4 w-full md:w-auto md:inline-grid">
-          <TabsTrigger value="general" className="text-xs">عام</TabsTrigger>
-          <TabsTrigger value="training" className="text-xs">التدريب</TabsTrigger>
-          <TabsTrigger value="quick" className="text-xs">ردود جاهزة</TabsTrigger>
-          <TabsTrigger value="test" className="text-xs">اختبار</TabsTrigger>
+        <TabsList className="grid grid-cols-4 w-full md:w-auto md:inline-grid bg-muted/50">
+          <TabsTrigger value="general" className="text-xs gap-1"><Bot className="h-3.5 w-3.5" /> عام</TabsTrigger>
+          <TabsTrigger value="training" className="text-xs gap-1"><Brain className="h-3.5 w-3.5" /> التدريب</TabsTrigger>
+          <TabsTrigger value="quick" className="text-xs gap-1"><Zap className="h-3.5 w-3.5" /> ردود جاهزة</TabsTrigger>
+          <TabsTrigger value="test" className="text-xs gap-1"><TestTube className="h-3.5 w-3.5" /> اختبار</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4 mt-4">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Bot className="h-5 w-5 text-primary" /> إعدادات عامة
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
+            <CardContent className="p-5 space-y-5">
+              <div className="flex items-center justify-between p-4 rounded-xl bg-primary/5 border border-primary/10">
                 <div>
-                  <Label className="font-semibold">الرد التلقائي</Label>
-                  <p className="text-xs text-muted-foreground">تفعيل الرد التلقائي بالذكاء الاصطناعي</p>
+                  <Label className="font-semibold text-base">الرد التلقائي</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">تفعيل الرد بالذكاء الاصطناعي على الرسائل الواردة</p>
                 </div>
-                <Switch checked={autoReply} onCheckedChange={setAutoReply} />
+                <Switch
+                  checked={settings?.auto_reply_enabled ?? true}
+                  onCheckedChange={(v) => setSettings({ ...settings, auto_reply_enabled: v })}
+                />
               </div>
 
               <div className="space-y-2">
                 <Label>اسم البوت</Label>
-                <Input defaultValue="مساعد الشركة" />
+                <Input value={settings?.bot_name || ""} onChange={(e) => setSettings({ ...settings, bot_name: e.target.value })} />
               </div>
 
               <div className="space-y-2">
                 <Label>شخصية البوت</Label>
                 <Textarea
                   rows={4}
-                  defaultValue="أنت مساعد ذكي ومهذب للشركة. ترد على استفسارات العملاء بشكل احترافي وودود."
+                  value={settings?.personality || ""}
+                  onChange={(e) => setSettings({ ...settings, personality: e.target.value })}
+                  className="resize-none"
                 />
               </div>
 
               <div className="space-y-2">
                 <Label>رسالة الترحيب</Label>
-                <Input defaultValue="مرحباً بك! كيف يمكنني مساعدتك اليوم؟" />
+                <Input value={settings?.welcome_message || ""} onChange={(e) => setSettings({ ...settings, welcome_message: e.target.value })} />
               </div>
 
-              <Button className="w-full md:w-auto">حفظ التغييرات</Button>
+              <Button onClick={saveSettings} disabled={saving} className="gap-2">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                حفظ التغييرات
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -83,21 +175,54 @@ export default function BotSettings() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Brain className="h-5 w-5 text-primary" /> بيانات التدريب
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Brain className="h-4 w-4 text-primary" /></div>
+                    بيانات التدريب
                   </CardTitle>
-                  <CardDescription>أضف أسئلة وأجوبة لتدريب البوت</CardDescription>
+                  <CardDescription>أضف أسئلة وأجوبة لتدريب البوت ({trainingData.length} عنصر)</CardDescription>
                 </div>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 ml-1" /> إضافة
-                </Button>
+                <Dialog open={showAddTraining} onOpenChange={setShowAddTraining}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> إضافة</Button>
+                  </DialogTrigger>
+                  <DialogContent dir="rtl">
+                    <DialogHeader><DialogTitle>إضافة بيانات تدريب</DialogTitle></DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <div className="space-y-1"><Label>التصنيف</Label><Input value={newQ.category} onChange={(e) => setNewQ({ ...newQ, category: e.target.value })} placeholder="general" /></div>
+                      <div className="space-y-1"><Label>السؤال</Label><Textarea value={newQ.question} onChange={(e) => setNewQ({ ...newQ, question: e.target.value })} placeholder="ما هي أسعار خدماتكم؟" /></div>
+                      <div className="space-y-1"><Label>الجواب</Label><Textarea value={newQ.answer} onChange={(e) => setNewQ({ ...newQ, answer: e.target.value })} placeholder="أسعارنا تبدأ من..." /></div>
+                      <Button onClick={addTraining} className="w-full">إضافة</Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>لا توجد بيانات تدريب بعد</p>
-                <p className="text-xs mt-1">أضف أسئلة وأجوبة ليتعلم منها البوت</p>
-              </div>
+              {trainingData.length === 0 ? (
+                <div className="text-center py-10 text-muted-foreground">
+                  <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3"><BookOpen className="h-7 w-7 opacity-40" /></div>
+                  <p className="font-medium">لا توجد بيانات تدريب</p>
+                  <p className="text-xs mt-1">أضف أسئلة وأجوبة ليتعلم منها البوت</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {trainingData.map((item) => (
+                    <div key={item.id} className="p-3 rounded-xl border bg-muted/30 hover:bg-muted/50 transition-colors">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge variant="secondary" className="text-[10px]">{item.category}</Badge>
+                          </div>
+                          <p className="text-sm font-medium">س: {item.question}</p>
+                          <p className="text-xs text-muted-foreground mt-1">ج: {item.answer}</p>
+                        </div>
+                        <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-destructive" onClick={() => deleteTraining(item.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -108,20 +233,51 @@ export default function BotSettings() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg flex items-center gap-2">
-                    <Zap className="h-5 w-5 text-primary" /> ردود جاهزة
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Zap className="h-4 w-4 text-primary" /></div>
+                    ردود جاهزة
                   </CardTitle>
-                  <CardDescription>قوالب ردود سريعة يستخدمها البوت</CardDescription>
+                  <CardDescription>قوالب سريعة يستخدمها البوت ({quickReplies.length} رد)</CardDescription>
                 </div>
-                <Button size="sm">
-                  <Plus className="h-4 w-4 ml-1" /> إضافة
-                </Button>
+                <Dialog open={showAddReply} onOpenChange={setShowAddReply}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> إضافة</Button>
+                  </DialogTrigger>
+                  <DialogContent dir="rtl">
+                    <DialogHeader><DialogTitle>إضافة رد جاهز</DialogTitle></DialogHeader>
+                    <div className="space-y-3 mt-2">
+                      <div className="space-y-1"><Label>العنوان</Label><Input value={newQR.title} onChange={(e) => setNewQR({ ...newQR, title: e.target.value })} placeholder="تحية" /></div>
+                      <div className="space-y-1"><Label>المحتوى</Label><Textarea value={newQR.content} onChange={(e) => setNewQR({ ...newQR, content: e.target.value })} placeholder="مرحباً! شكراً لتواصلك معنا" /></div>
+                      <div className="space-y-1"><Label>التصنيف</Label><Input value={newQR.category} onChange={(e) => setNewQR({ ...newQR, category: e.target.value })} placeholder="general" /></div>
+                      <Button onClick={addQuickReply} className="w-full">إضافة</Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-8 text-muted-foreground">
-                <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>لا توجد ردود جاهزة بعد</p>
-              </div>
+              {quickReplies.length === 0 ? (
+                <div className="text-center py-10 text-muted-foreground">
+                  <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3"><MessageSquare className="h-7 w-7 opacity-40" /></div>
+                  <p className="font-medium">لا توجد ردود جاهزة</p>
+                </div>
+              ) : (
+                <div className="grid gap-2 md:grid-cols-2">
+                  {quickReplies.map((qr) => (
+                    <div key={qr.id} className="p-3 rounded-xl border bg-muted/30 hover:bg-muted/50 transition-colors">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{qr.title}</p>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{qr.content}</p>
+                          <Badge variant="secondary" className="text-[10px] mt-2">{qr.category}</Badge>
+                        </div>
+                        <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-destructive" onClick={() => deleteQuickReply(qr.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -130,23 +286,47 @@ export default function BotSettings() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
-                <TestTube className="h-5 w-5 text-primary" /> اختبار البوت
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><TestTube className="h-4 w-4 text-primary" /></div>
+                اختبار البوت
               </CardTitle>
               <CardDescription>جرب البوت قبل تشغيله على الواتساب</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-lg border bg-muted/30 p-4 mb-4 min-h-[200px]">
-                <p className="text-center text-sm text-muted-foreground">ابدأ بإرسال رسالة لاختبار البوت</p>
+              <div className="rounded-xl border bg-[hsl(140,20%,93%)] p-4 mb-4 min-h-[200px] space-y-3">
+                {!testResponse && !testing && (
+                  <p className="text-center text-sm text-muted-foreground pt-16">ابدأ بإرسال رسالة لاختبار البوت</p>
+                )}
+                {testMessage && (testResponse || testing) && (
+                  <div className="flex justify-end">
+                    <div className="bg-white px-3 py-2 rounded-2xl rounded-tr-md text-sm max-w-[80%] shadow-sm">{testMessage}</div>
+                  </div>
+                )}
+                {testing && (
+                  <div className="flex justify-start">
+                    <div className="bg-[hsl(142,50%,88%)] px-3 py-2 rounded-2xl rounded-tl-md text-sm shadow-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    </div>
+                  </div>
+                )}
+                {testResponse && (
+                  <div className="flex justify-start">
+                    <div className="bg-[hsl(142,50%,88%)] px-3 py-2 rounded-2xl rounded-tl-md text-sm max-w-[80%] shadow-sm">
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground mb-1"><Bot className="h-3 w-3" /> AI</div>
+                      {testResponse}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
                 <Input
                   value={testMessage}
                   onChange={(e) => setTestMessage(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && testBot()}
                   placeholder="اكتب رسالة اختبارية..."
-                  className="flex-1"
+                  className="flex-1 bg-muted/50 border-0 rounded-full"
                 />
-                <Button disabled={!testMessage.trim()}>
-                  <Send className="h-4 w-4 ml-1" /> إرسال
+                <Button onClick={testBot} disabled={!testMessage.trim() || testing} className="rounded-full gap-1">
+                  <Send className="h-4 w-4" /> إرسال
                 </Button>
               </div>
             </CardContent>
