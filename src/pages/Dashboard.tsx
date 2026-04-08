@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Users, Bot, Wifi, WifiOff, TrendingUp, Clock, ArrowUpRight, Brain, Database, Sparkles } from "lucide-react";
+import { MessageSquare, Users, Bot, Wifi, WifiOff, TrendingUp, Clock, ArrowUpRight, Brain, Database, Sparkles, Smartphone } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 
 const weekDays = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ messages: 0, contacts: 0, aiReplies: 0, connected: false, knowledgeItems: 0, memories: 0 });
+  const [stats, setStats] = useState({ messages: 0, contacts: 0, aiReplies: 0, connected: false, knowledgeItems: 0, memories: 0, profiles: 0 });
   const [recentConversations, setRecentConversations] = useState<any[]>([]);
   const [weeklyData, setWeeklyData] = useState(weekDays.map(d => ({ day: d, messages: 0, ai: 0 })));
 
@@ -17,7 +17,7 @@ export default function Dashboard() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      const [messagesRes, contactsRes, aiRes, sessionRes, convRes, kbRes, memRes] = await Promise.all([
+      const [messagesRes, contactsRes, aiRes, sessionRes, convRes, kbRes, memRes, profilesRes] = await Promise.all([
         supabase.from("messages").select("id", { count: "exact", head: true }).gte("created_at", today.toISOString()),
         supabase.from("contacts").select("id", { count: "exact", head: true }),
         supabase.from("messages").select("id", { count: "exact", head: true }).eq("sender_type", "ai").gte("created_at", today.toISOString()),
@@ -25,6 +25,7 @@ export default function Dashboard() {
         supabase.from("conversations").select("*, contacts(name, phone, whatsapp_name, whatsapp_avatar_url)").order("last_message_at", { ascending: false }).limit(5),
         supabase.from("knowledge_base" as any).select("id", { count: "exact", head: true }).eq("is_active", true),
         supabase.from("customer_memory").select("id", { count: "exact", head: true }),
+        supabase.from("whatsapp_profiles" as any).select("id", { count: "exact", head: true }),
       ]);
 
       setStats({
@@ -34,6 +35,7 @@ export default function Dashboard() {
         connected: sessionRes.data?.status === "connected",
         knowledgeItems: (kbRes as any).count || 0,
         memories: memRes.count || 0,
+        profiles: (profilesRes as any).count || 0,
       });
       setRecentConversations(convRes.data || []);
     };
@@ -43,10 +45,10 @@ export default function Dashboard() {
   const statCards = [
     { title: "رسائل اليوم", value: stats.messages.toString(), icon: MessageSquare, gradient: "from-emerald-500/15 to-green-500/5", iconColor: "text-emerald-600" },
     { title: "جهات الاتصال", value: stats.contacts.toString(), icon: Users, gradient: "from-blue-500/15 to-cyan-500/5", iconColor: "text-blue-600" },
-    { title: "ردود AI اليوم", value: stats.aiReplies.toString(), icon: Bot, gradient: "from-violet-500/15 to-purple-500/5", iconColor: "text-violet-600" },
+    { title: "ردود مرام", value: stats.aiReplies.toString(), icon: Bot, gradient: "from-violet-500/15 to-purple-500/5", iconColor: "text-violet-600" },
     { title: "حالة الاتصال", value: stats.connected ? "متصل" : "غير متصل", icon: stats.connected ? Wifi : WifiOff, gradient: stats.connected ? "from-emerald-500/15 to-green-500/5" : "from-gray-500/10 to-gray-500/5", iconColor: stats.connected ? "text-emerald-600" : "text-muted-foreground" },
     { title: "قاعدة المعرفة", value: stats.knowledgeItems.toString(), icon: Database, gradient: "from-amber-500/15 to-orange-500/5", iconColor: "text-amber-600" },
-    { title: "ذكريات العملاء", value: stats.memories.toString(), icon: Brain, gradient: "from-pink-500/15 to-rose-500/5", iconColor: "text-pink-600" },
+    { title: "الأرقام المربوطة", value: stats.profiles.toString(), icon: Smartphone, gradient: "from-pink-500/15 to-rose-500/5", iconColor: "text-pink-600" },
   ];
 
   return (
@@ -58,7 +60,7 @@ export default function Dashboard() {
           </div>
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight">لوحة التحكم</h1>
-            <p className="text-muted-foreground text-sm">نظرة عامة على نشاط الواتساب والبوت</p>
+            <p className="text-muted-foreground text-sm">Sity Cloud Bot - نظام خدمة العملاء الذكي</p>
           </div>
         </div>
         <Badge variant={stats.connected ? "default" : "secondary"} className="gap-1.5 px-3 py-1.5 rounded-full">

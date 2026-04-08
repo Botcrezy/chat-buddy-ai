@@ -114,6 +114,18 @@ async function sendWebhook(data) {
   }
 }
 
+// Typing indicator helper
+async function sendTypingIndicator(jid, durationMs = 2000) {
+  try {
+    await sock.presenceSubscribe(jid);
+    await sock.sendPresenceUpdate('composing', jid);
+    await new Promise(r => setTimeout(r, durationMs));
+    await sock.sendPresenceUpdate('paused', jid);
+  } catch (e) {
+    addLog('warn', 'Typing indicator error', e.message);
+  }
+}
+
 let noQrAttempts = 0;
 
 async function startSocket() {
@@ -181,7 +193,7 @@ async function startSocket() {
       if (qr) {
         qrCode = qr;
         reconnectAttempts = 0;
-        noQrAttempts = 0; // QR generated = connection is working
+        noQrAttempts = 0;
         addLog('info', '📱 QR Code generated - scan with WhatsApp');
 
         try {
@@ -297,6 +309,10 @@ async function startSocket() {
 
         if (result?.ai_reply || result?.ai_media_url) {
           try {
+            // Show "typing..." indicator before sending
+            const typingDuration = 1000 + Math.random() * 2000; // 1-3 seconds
+            await sendTypingIndicator(msg.key.remoteJid, typingDuration);
+
             // Send image first if present
             if (result.ai_media_url) {
               try {
@@ -339,6 +355,10 @@ app.post('/send', async (req, res) => {
       return res.status(400).json({ error: 'phone and (message or media_url) required' });
     }
     const jid = `${phone}@s.whatsapp.net`;
+
+    // Show typing before sending
+    await sendTypingIndicator(jid, 1000);
+
     if (media_type === 'image' && media_url) {
       await sock.sendMessage(jid, { image: { url: media_url }, caption: message || '' });
     } else {
@@ -414,7 +434,6 @@ app.post('/reset-session', async (req, res) => {
     qrCode = null;
     reconnectAttempts = 0;
 
-    // Delete auth directory
     if (fs.existsSync(AUTH_DIR)) {
       fs.rmSync(AUTH_DIR, { recursive: true, force: true });
       addLog('info', `Deleted auth directory: ${AUTH_DIR}`);
@@ -423,7 +442,6 @@ app.post('/reset-session', async (req, res) => {
     await updateStatus({ status: 'disconnected', qr_code: null, phone_number: null });
     lastRestartTime = new Date().toISOString();
 
-    // Restart after brief delay
     setTimeout(startSocket, 2000);
     res.json({ success: true, message: 'Session cleared. Reconnecting in 2s...' });
   } catch (e) {

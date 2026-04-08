@@ -5,8 +5,8 @@ import {
   Users,
   Wifi,
   Settings,
-  Smartphone,
   Megaphone,
+  Cloud,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -47,13 +47,13 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" side="right" className="border-l-0 border-r">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary">
-            <Smartphone className="h-5 w-5 text-primary-foreground" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent shadow-md">
+            <Cloud className="h-5 w-5 text-primary-foreground" />
           </div>
           {!collapsed && (
             <div>
-              <h2 className="text-sm font-bold text-sidebar-foreground">واتساب بوت</h2>
-              <p className="text-xs text-sidebar-foreground/60">نظام إدارة الرسائل</p>
+              <h2 className="text-sm font-bold text-sidebar-foreground">Sity Cloud Bot</h2>
+              <p className="text-xs text-sidebar-foreground/60">نظام خدمة العملاء الذكي</p>
             </div>
           )}
         </div>
