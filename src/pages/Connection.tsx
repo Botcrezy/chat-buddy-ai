@@ -3,10 +3,19 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Wifi, WifiOff, RefreshCw, QrCode, Smartphone, Loader2, Server, RotateCcw, ExternalLink, Activity } from "lucide-react";
+import { Wifi, WifiOff, RefreshCw, QrCode, Smartphone, Loader2, Server, RotateCcw, Activity, Trash2, AlertTriangle } from "lucide-react";
+
+interface ServerDiagnostics {
+  auth_dir?: string;
+  auth_files?: number;
+  has_creds?: boolean;
+  reconnect_attempts?: number;
+  last_connection_event?: any;
+  last_restart?: string;
+}
 
 export default function Connection() {
   const { toast } = useToast();
@@ -15,10 +24,12 @@ export default function Connection() {
   const [serverUrl, setServerUrl] = useState("");
   const [serverStatus, setServerStatus] = useState<"unknown" | "online" | "offline">("unknown");
   const [serverInfo, setServerInfo] = useState<any>(null);
+  const [diagnostics, setDiagnostics] = useState<ServerDiagnostics | null>(null);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
   const [restarting, setRestarting] = useState(false);
+  const [resettingSession, setResettingSession] = useState(false);
   const [savingUrl, setSavingUrl] = useState(false);
 
-  // Load server URL from bot_settings
   useEffect(() => {
     supabase.from("bot_settings").select("baileys_server_url").limit(1).single().then(({ data }) => {
       if (data?.baileys_server_url) setServerUrl(data.baileys_server_url);
@@ -36,22 +47,32 @@ export default function Connection() {
     setLoading(false);
   }, []);
 
-  // Check server health directly
   const checkServer = useCallback(async () => {
     if (!serverUrl) { setServerStatus("unknown"); return; }
     try {
       const url = serverUrl.replace(/\/$/, "");
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      const data = await res.json();
+      // Fetch health + logs in parallel
+      const [healthRes, logsRes] = await Promise.all([
+        fetch(url, { signal: AbortSignal.timeout(5000) }),
+        fetch(`${url}/logs`, { signal: AbortSignal.timeout(5000) }).catch(() => null),
+      ]);
+      const healthData = await healthRes.json();
       setServerStatus("online");
-      setServerInfo(data);
+      setServerInfo(healthData);
+
+      if (logsRes?.ok) {
+        const logsData = await logsRes.json();
+        setDiagnostics(logsData.diagnostics || null);
+        setRecentLogs((logsData.logs || []).slice(-5));
+      }
     } catch {
       setServerStatus("offline");
       setServerInfo(null);
+      setDiagnostics(null);
+      setRecentLogs([]);
     }
   }, [serverUrl]);
 
-  // Auto-refresh every 5 seconds
   useEffect(() => {
     fetchStatus();
     checkServer();
@@ -65,6 +86,10 @@ export default function Connection() {
   const isConnected = session?.status === "connected";
   const isWaitingQR = session?.status === "waiting_qr";
   const isStarting = session?.status === "starting";
+
+  // Detect stuck state: server online but no QR and not connected
+  const isStuck = serverStatus === "online" && !isConnected && !isWaitingQR && !isStarting
+    && (diagnostics?.reconnect_attempts || 0) > 2;
 
   const saveServerUrl = async () => {
     setSavingUrl(true);
@@ -89,6 +114,23 @@ export default function Connection() {
     setRestarting(false);
   };
 
+  const resetSession = async () => {
+    if (!serverUrl) return;
+    setResettingSession(true);
+    try {
+      const res = await fetch(`${serverUrl.replace(/\/$/, "")}/reset-session`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        toast({ title: "تم مسح الجلسة وإعادة الاتصال 🗑️✅" });
+      } else {
+        toast({ title: "فشل مسح الجلسة", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "فشل الاتصال بالسيرفر ❌", variant: "destructive" });
+    }
+    setResettingSession(false);
+  };
+
   const statusBadge = () => {
     if (isConnected) return <Badge className="gap-1 bg-emerald-500/15 text-emerald-600 border-emerald-200"><div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />متصل</Badge>;
     if (isWaitingQR) return <Badge className="gap-1 bg-amber-500/15 text-amber-600 border-amber-200"><div className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />بانتظار QR</Badge>;
@@ -102,6 +144,22 @@ export default function Connection() {
         <h1 className="text-2xl font-bold">اتصال واتساب</h1>
         <p className="text-muted-foreground text-sm">ربط حساب واتساب بالنظام عبر QR Code</p>
       </div>
+
+      {/* Stuck State Alert */}
+      {isStuck && (
+        <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="space-y-2">
+            <p className="font-semibold">⚠️ السيرفر يعمل لكن لا يتم توليد QR Code</p>
+            <p className="text-sm">غالبًا توجد جلسة محفوظة تالفة على السيرفر. اضغط "إعادة تعيين الجلسة" لمسحها وتوليد QR جديد.</p>
+            <p className="text-xs text-muted-foreground">محاولات إعادة الاتصال: {diagnostics?.reconnect_attempts || 0}</p>
+            <Button size="sm" variant="outline" onClick={resetSession} disabled={resettingSession} className="gap-1 mt-1">
+              {resettingSession ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              إعادة تعيين الجلسة
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Server URL */}
       <Card>
@@ -128,13 +186,17 @@ export default function Connection() {
           </div>
           {serverInfo && (
             <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-lg font-mono" dir="ltr">
-              uptime: {Math.floor(serverInfo.uptime || 0)}s | connected: {String(serverInfo.connected)} | logs: {serverInfo.logs_count || 0}
+              uptime: {Math.floor(serverInfo.uptime || 0)}s | connected: {String(serverInfo.connected)} | auth_files: {serverInfo.auth_file_count || 0} | reconnects: {serverInfo.reconnect_attempts || 0}
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="sm" onClick={restartServer} disabled={restarting || !serverUrl} className="gap-1">
               {restarting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
               إعادة تشغيل
+            </Button>
+            <Button variant="outline" size="sm" onClick={resetSession} disabled={resettingSession || !serverUrl} className="gap-1 text-destructive border-destructive/30 hover:bg-destructive/10">
+              {resettingSession ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              إعادة تعيين الجلسة
             </Button>
             {serverUrl && (
               <Button variant="outline" size="sm" asChild className="gap-1">
@@ -219,6 +281,26 @@ export default function Connection() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Recent Logs */}
+      {recentLogs.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" /> آخر الأحداث
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1 font-mono text-xs max-h-40 overflow-y-auto" dir="ltr">
+              {recentLogs.map((log, i) => (
+                <div key={i} className={`p-1.5 rounded ${log.level === 'error' ? 'bg-destructive/10 text-destructive' : log.level === 'warn' ? 'bg-amber-500/10 text-amber-700' : 'bg-muted/30 text-muted-foreground'}`}>
+                  <span className="opacity-60">{log.time?.slice(11, 19)}</span> {log.message}
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}

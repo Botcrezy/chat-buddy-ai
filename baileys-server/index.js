@@ -22,14 +22,18 @@ const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const STATUS_URL = process.env.STATUS_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const AUTH_DIR = process.env.AUTH_DIR || './auth_session';
 
 let sock = null;
 let qrCode = null;
 let isConnecting = false;
+let reconnectAttempts = 0;
+let lastConnectionEvent = null;
+let lastRestartTime = null;
 
 // In-memory log buffer for remote debugging
 const logBuffer = [];
-const MAX_LOGS = 100;
+const MAX_LOGS = 200;
 
 function addLog(level, message, data = null) {
   const entry = {
@@ -44,6 +48,30 @@ function addLog(level, message, data = null) {
 }
 
 const logger = pino({ level: 'info' });
+
+function getAuthInfo() {
+  try {
+    const exists = fs.existsSync(AUTH_DIR);
+    const files = exists ? fs.readdirSync(AUTH_DIR) : [];
+    const hasCreds = files.includes('creds.json');
+    return { exists, fileCount: files.length, hasCreds, path: AUTH_DIR };
+  } catch {
+    return { exists: false, fileCount: 0, hasCreds: false, path: AUTH_DIR };
+  }
+}
+
+function cleanupSocket() {
+  if (sock) {
+    try {
+      sock.ev.removeAllListeners('connection.update');
+      sock.ev.removeAllListeners('messages.upsert');
+      sock.ev.removeAllListeners('creds.update');
+      sock.end();
+    } catch {}
+    sock = null;
+  }
+  isConnecting = false;
+}
 
 async function updateStatus(data) {
   if (!STATUS_URL) {
@@ -92,12 +120,26 @@ async function startSocket() {
     return;
   }
   isConnecting = true;
-  addLog('info', '🔄 Starting WhatsApp socket...');
+  reconnectAttempts++;
+  const authInfo = getAuthInfo();
+  addLog('info', '🔄 Starting WhatsApp socket...', { authInfo, attempt: reconnectAttempts });
   await updateStatus({ status: 'starting', qr_code: null });
 
+  // Auto-reset after too many failed attempts without QR
+  if (reconnectAttempts > 5 && authInfo.hasCreds) {
+    addLog('warn', `⚠️ ${reconnectAttempts} failed attempts. Session likely corrupted. Auto-resetting...`);
+    try {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      addLog('info', '🗑️ Auto-cleared corrupted auth_session');
+    } catch (e) {
+      addLog('error', 'Failed to auto-clear session', e.message);
+    }
+    reconnectAttempts = 0;
+  }
+
   try {
-    const { state, saveCreds } = await useMultiFileAuthState('./auth_session');
-    addLog('info', 'Auth state loaded successfully');
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    addLog('info', 'Auth state loaded', { authDir: AUTH_DIR, hasCredsFile: getAuthInfo().hasCreds });
 
     const { version } = await fetchLatestBaileysVersion();
     addLog('info', `Baileys version: ${version.join('.')}`);
@@ -118,10 +160,23 @@ async function startSocket() {
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
-      addLog('info', 'Connection update', { connection, hasQR: !!qr, lastDisconnectCode: lastDisconnect?.error?.output?.statusCode });
+      lastConnectionEvent = { connection, time: new Date().toISOString(), hasQR: !!qr };
+
+      const disconnectError = lastDisconnect?.error;
+      const statusCode = (disconnectError instanceof Boom)
+        ? disconnectError.output.statusCode
+        : (disconnectError?.output?.statusCode || 0);
+
+      addLog('info', 'Connection update', {
+        connection,
+        hasQR: !!qr,
+        statusCode,
+        errorMessage: disconnectError?.message || null,
+      });
 
       if (qr) {
         qrCode = qr;
+        reconnectAttempts = 0; // QR generated = session is working
         addLog('info', '📱 QR Code generated - scan with WhatsApp');
 
         try {
@@ -135,26 +190,24 @@ async function startSocket() {
 
       if (connection === 'close') {
         isConnecting = false;
-        const statusCode = (lastDisconnect?.error instanceof Boom)
-          ? lastDisconnect.error.output.statusCode
-          : 0;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-        addLog('info', `Connection closed. Code: ${statusCode}, Reconnecting: ${shouldReconnect}`);
+        addLog('info', `Connection closed. Code: ${statusCode}, Reconnecting: ${shouldReconnect}, Attempts: ${reconnectAttempts}`);
         await updateStatus({ status: 'disconnected' });
 
         if (shouldReconnect) {
-          const delay = statusCode === 515 ? 30000 : 10000; // rate limit = 30s, else 10s
+          const delay = statusCode === 515 ? 30000 : 10000;
           addLog('info', `Reconnecting in ${delay / 1000}s...`);
           setTimeout(startSocket, delay);
         } else {
-          addLog('warn', '⚠️ Logged out! Clear auth_session and restart to re-scan QR');
+          addLog('warn', '⚠️ Logged out! Use /reset-session to clear and re-scan QR');
         }
       }
 
       if (connection === 'open') {
         isConnecting = false;
         qrCode = null;
+        reconnectAttempts = 0;
         const phoneNumber = sock.user?.id?.split(':')[0] || '';
         addLog('info', `✅ Connected! Phone: ${phoneNumber}`);
 
@@ -314,18 +367,53 @@ app.get('/status', (req, res) => {
 
 // API: Get logs (remote debugging)
 app.get('/logs', (req, res) => {
-  res.json({ logs: logBuffer.slice(-50) });
+  const authInfo = getAuthInfo();
+  res.json({
+    logs: logBuffer.slice(-50),
+    diagnostics: {
+      auth_dir: AUTH_DIR,
+      auth_files: authInfo.fileCount,
+      has_creds: authInfo.hasCreds,
+      reconnect_attempts: reconnectAttempts,
+      last_connection_event: lastConnectionEvent,
+      last_restart: lastRestartTime,
+      uptime: process.uptime(),
+    },
+  });
+});
+
+// API: Reset session (clear auth and reconnect)
+app.post('/reset-session', async (req, res) => {
+  try {
+    addLog('info', '🗑️ Reset session requested via API');
+    cleanupSocket();
+    qrCode = null;
+    reconnectAttempts = 0;
+
+    // Delete auth directory
+    if (fs.existsSync(AUTH_DIR)) {
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      addLog('info', `Deleted auth directory: ${AUTH_DIR}`);
+    }
+
+    await updateStatus({ status: 'disconnected', qr_code: null, phone_number: null });
+    lastRestartTime = new Date().toISOString();
+
+    // Restart after brief delay
+    setTimeout(startSocket, 2000);
+    res.json({ success: true, message: 'Session cleared. Reconnecting in 2s...' });
+  } catch (e) {
+    addLog('error', 'Reset session error', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // API: Restart connection
 app.post('/restart', async (req, res) => {
   try {
     addLog('info', '🔄 Restart requested via API');
-    if (sock) {
-      sock.end();
-      sock = null;
-    }
-    isConnecting = false;
+    cleanupSocket();
+    lastRestartTime = new Date().toISOString();
     setTimeout(startSocket, 2000);
     res.json({ success: true, message: 'Restarting...' });
   } catch (e) {
@@ -336,11 +424,14 @@ app.post('/restart', async (req, res) => {
 // API: Logout
 app.post('/logout', async (req, res) => {
   try {
-    await sock?.logout();
-    fs.rmSync('./auth_session', { recursive: true, force: true });
+    if (sock) {
+      try { await sock.logout(); } catch {}
+    }
+    cleanupSocket();
+    fs.rmSync(AUTH_DIR, { recursive: true, force: true });
     await updateStatus({ status: 'disconnected', qr_code: null, phone_number: null });
-    sock = null;
-    isConnecting = false;
+    qrCode = null;
+    reconnectAttempts = 0;
     res.json({ success: true });
     setTimeout(startSocket, 2000);
   } catch (e) {
@@ -350,16 +441,23 @@ app.post('/logout', async (req, res) => {
 
 // Health check
 app.get('/', (req, res) => {
+  const authInfo = getAuthInfo();
   res.json({
     status: 'running',
     connected: !!sock?.user,
     connecting: isConnecting,
     uptime: process.uptime(),
     logs_count: logBuffer.length,
+    auth_dir: AUTH_DIR,
+    has_auth_files: authInfo.hasCreds,
+    auth_file_count: authInfo.fileCount,
+    reconnect_attempts: reconnectAttempts,
+    last_connection_event: lastConnectionEvent,
   });
 });
 
 app.listen(PORT, () => {
   addLog('info', `🚀 Baileys server running on port ${PORT}`);
+  addLog('info', `Auth directory: ${AUTH_DIR}`);
   startSocket();
 });
