@@ -145,6 +145,7 @@ async function startSocket() {
     addLog('info', 'Auth state loaded', { authDir: AUTH_DIR, hasCredsFile: getAuthInfo().hasCreds });
 
     sock = makeWASocket({
+      version: [2, 3000, 1033893291],
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
