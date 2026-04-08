@@ -32,6 +32,7 @@ const App = () => (
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/bot-settings" element={<BotSettings />} />
+              <Route path="/broadcast" element={<Broadcast />} />
               <Route path="/connection" element={<Connection />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
