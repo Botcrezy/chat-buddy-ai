@@ -1,12 +1,35 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Settings, Clock, Bell, Globe } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { Clock, Bell, Globe, Save, Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
+  const { toast } = useToast();
+  const [settings, setSettings] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    supabase.from("bot_settings").select("*").limit(1).single().then(({ data }) => setSettings(data));
+  }, []);
+
+  const save = async () => {
+    if (!settings) return;
+    setSaving(true);
+    await supabase.from("bot_settings").update({
+      working_hours_start: settings.working_hours_start,
+      working_hours_end: settings.working_hours_end,
+      off_hours_message: settings.off_hours_message,
+    }).eq("id", settings.id);
+    toast({ title: "تم حفظ الإعدادات ✅" });
+    setSaving(false);
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6" dir="rtl">
       <div>
@@ -17,24 +40,26 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Clock className="h-5 w-5 text-primary" /> أوقات العمل
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Clock className="h-4 w-4 text-primary" /></div>
+            أوقات العمل
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>بداية العمل</Label>
-              <Input type="time" defaultValue="09:00" />
+              <Input type="time" value={settings?.working_hours_start || "09:00"} onChange={(e) => setSettings({ ...settings, working_hours_start: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label>نهاية العمل</Label>
-              <Input type="time" defaultValue="17:00" />
+              <Input type="time" value={settings?.working_hours_end || "17:00"} onChange={(e) => setSettings({ ...settings, working_hours_end: e.target.value })} />
             </div>
           </div>
           <div className="space-y-2">
             <Label>رسالة خارج أوقات العمل</Label>
             <Textarea
-              defaultValue="شكراً لتواصلك. نحن خارج أوقات العمل حالياً، سنرد عليك في أقرب وقت."
+              value={settings?.off_hours_message || ""}
+              onChange={(e) => setSettings({ ...settings, off_hours_message: e.target.value })}
               rows={3}
             />
           </div>
@@ -44,49 +69,47 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Bell className="h-5 w-5 text-primary" /> الإشعارات
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Bell className="h-4 w-4 text-primary" /></div>
+            الإشعارات
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-            <div>
-              <Label>إشعارات الرسائل الجديدة</Label>
-              <p className="text-xs text-muted-foreground">إشعار عند وصول رسالة جديدة</p>
+        <CardContent className="space-y-3">
+          {[
+            { label: "إشعارات الرسائل الجديدة", desc: "إشعار عند وصول رسالة جديدة" },
+            { label: "إشعارات فشل AI", desc: "إشعار عندما لا يستطيع البوت الرد" },
+            { label: "إشعارات انقطاع الاتصال", desc: "إشعار عند فقدان اتصال الواتساب" },
+          ].map((item, i) => (
+            <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 border">
+              <div>
+                <Label className="font-medium">{item.label}</Label>
+                <p className="text-xs text-muted-foreground">{item.desc}</p>
+              </div>
+              <Switch defaultChecked />
             </div>
-            <Switch defaultChecked />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-            <div>
-              <Label>إشعارات فشل AI</Label>
-              <p className="text-xs text-muted-foreground">إشعار عندما لا يستطيع البوت الرد</p>
-            </div>
-            <Switch defaultChecked />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-            <div>
-              <Label>إشعارات انقطاع الاتصال</Label>
-              <p className="text-xs text-muted-foreground">إشعار عند فقدان اتصال الواتساب</p>
-            </div>
-            <Switch defaultChecked />
-          </div>
+          ))}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <Globe className="h-5 w-5 text-primary" /> عنوان سيرفر Baileys
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"><Globe className="h-4 w-4 text-primary" /></div>
+            عنوان سيرفر Baileys
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>عنوان URL للسيرفر الخارجي</Label>
-            <Input placeholder="https://your-vps-ip:3001" dir="ltr" />
+            <Input placeholder="https://your-vps-ip:3001" dir="ltr" className="font-mono text-sm" />
             <p className="text-xs text-muted-foreground">عنوان سيرفر Baileys الذي يشغل اتصال الواتساب</p>
           </div>
-          <Button>حفظ الإعدادات</Button>
         </CardContent>
       </Card>
+
+      <Button onClick={save} disabled={saving} className="gap-2">
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+        حفظ الإعدادات
+      </Button>
     </div>
   );
 }
