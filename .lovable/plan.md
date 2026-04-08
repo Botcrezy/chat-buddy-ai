@@ -1,65 +1,107 @@
 
 
-# إصلاح مشكلة عدم توليد QR Code في Baileys
+# خطة شاملة: تحسين الذكاء الاصطناعي + تطوير واجهة المستخدم
 
-## التشخيص الدقيق
+## ملخص المشاكل الحالية
+1. **الذكاء الاصطناعي ضعيف** - يستخدم نموذج `stepfun/step-3.5-flash:free` (مجاني وضعيف جداً) عبر OpenRouter
+2. **بيانات التدريب محدودة** - فقط سؤال/جواب بسيط، بدون دعم لتدريب مفصل بالصور والملفات
+3. **واجهة المستخدم** تحتاج تحسين شامل
 
-من بيانات السيرفر:
-```text
-has_auth_files: false    ← لا توجد جلسة محفوظة أصلاً
-auth_file_count: 0       ← مجلد فاضي
-connecting: false        ← توقف عن المحاولة
-reconnect_attempts: 2    ← حاول مرتين وفشل
-last_event: close, hasQR: false  ← يُغلق فوراً بدون QR
+---
+
+## الجزء الأول: تحسين الذكاء الاصطناعي
+
+### 1. تغيير نموذج AI إلى نموذج أقوى
+- استبدال `stepfun/step-3.5-flash:free` بنموذج `google/gemini-2.5-flash` عبر Lovable AI Gateway
+- سيتم استخدام `LOVABLE_API_KEY` الموجود بالفعل في Supabase secrets
+- تغيير endpoint من OpenRouter إلى `https://ai.gateway.lovable.dev/v1/chat/completions`
+- زيادة `max_tokens` من 500 إلى 1000 للردود الأكثر تفصيلاً
+
+### 2. تطوير نظام التدريب (Knowledge Base)
+- إضافة جدول جديد `knowledge_base` يدعم أنواع متعددة من البيانات:
+  - `text` - نصوص تدريبية حرة (وصف منتجات، سياسات، أسعار...)
+  - `image` - صور مع وصف (منتجات، كتالوج...)
+  - `faq` - أسئلة وأجوبة (الموجود حالياً)
+  - `document` - مستندات نصية كاملة
+- كل عنصر يحتوي: `title`, `content`, `category`, `media_url`, `media_type`, `data_type`
+- الأدمن يقدر يضيف بيانات مفصلة عن الشركة والمنتجات مع الصور
+
+### 3. تحسين System Prompt والسياق
+- بناء system prompt أذكى يستخدم كل بيانات التدريب الجديدة
+- إرسال وصف الصور للـ AI مع السياق حتى يقدر يرد ويرسل صور للعملاء
+- تحسين استخراج الذاكرة التلقائي من المحادثات
+- إضافة تعليمات للبوت لإرسال روابط صور المنتجات عند الطلب
+
+### 4. دعم إرسال الصور من البوت
+- عندما يسأل العميل عن منتج، البوت يبحث في `knowledge_base` عن صور مرتبطة
+- يضيف رابط الصورة في الرد حتى Baileys يرسلها كصورة فعلية
+- تعديل webhook ليدعم إرجاع `media_url` مع الرد
+
+---
+
+## الجزء الثاني: تحسين واجهة المستخدم
+
+### 5. تحسين لوحة التحكم (Dashboard)
+- تصميم أنظف مع بطاقات إحصائية محسنة
+- إضافة مؤشرات أداء البوت (نسبة الردود الناجحة، متوسط وقت الرد)
+- تحسين الرسم البياني الأسبوعي
+
+### 6. تحسين صفحة إعدادات البوت
+- تبويب جديد "قاعدة المعرفة" بدل التدريب البسيط
+- نموذج إضافة بيانات يدعم: نص حر + صور + تصنيفات
+- عرض البيانات بشكل بطاقات مع معاينة الصور
+- إمكانية رفع صور المنتجات مع وصف مفصل
+
+### 7. تحسين الخطوط والتصميم العام
+- استخدام خط Cairo بشكل أفضل مع أوزان متنوعة
+- تحسين spacing والألوان
+- تحسين responsive للموبايل
+
+---
+
+## التفاصيل التقنية
+
+### Migration جديدة
+```sql
+CREATE TABLE knowledge_base (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  category TEXT DEFAULT 'general',
+  data_type TEXT DEFAULT 'text', -- text, image, faq, document
+  media_url TEXT,
+  media_type TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 ```
+مع RLS policy للأدمن.
 
-**السبب الحقيقي**: الكود يستخدم Baileys v6 (`^6.7.16`) لكن بصيغة API قديمة. في الإصدار 6:
-- `browser` يجب أن يستخدم `Browsers` helper بدل array يدوي
-- `fetchLatestBaileysVersion()` قد يرجع إصدار غير متوافق
-- الاتصال يُغلق فوراً (code 0) لأن WhatsApp ترفض الـ handshake
+### تعديل `whatsapp-webhook/index.ts`
+- تغيير API endpoint إلى Lovable AI Gateway
+- استخدام `LOVABLE_API_KEY` بدل `OPENROUTER_API_KEY`
+- جلب بيانات من `knowledge_base` + `training_data`
+- إضافة منطق إرسال الصور مع ردود البوت
+- تحسين system prompt ليكون أذكى وأكثر تفصيلاً
 
-## التعديلات المطلوبة
+### تعديل `baileys-server/index.js`
+- دعم إرسال صور عند وجود `media_url` في رد الـ webhook
 
-### 1. إصلاح `baileys-server/index.js` - تكوين الاتصال
-
-```text
-التغييرات الرئيسية:
-```
-
-- استيراد `Browsers` من Baileys واستخدامه بدل array يدوي:
-  ```js
-  browser: Browsers.ubuntu('WhatsApp Bot')
-  ```
-- إزالة `fetchLatestBaileysVersion()` واستخدام إصدار ثابت معروف يعمل، أو تركه بدون version (Baileys يختار تلقائياً)
-- إضافة خيارات اتصال إضافية:
-  ```js
-  syncFullHistory: false
-  markOnlineOnConnect: false
-  connectTimeoutMs: 60000
-  ```
-- تحسين error handling: طباعة الخطأ الكامل عند الإغلاق بدل code فقط
-- إضافة `retryRequestDelayMs` لتجنب rate limiting
-
-### 2. إصلاح منطق إعادة المحاولة
-
-- حالياً الـ auto-reset يتحقق من `authInfo.hasCreds` - لكن لما الملفات فاضية مش هيعمل reset
-- تغيير المنطق: بعد 3 محاولات بدون QR (بغض النظر عن وجود ملفات)، يمسح المجلد ويبدأ من جديد
-- إضافة exponential backoff بدل delay ثابت (10s, 20s, 40s...)
-
-### 3. تحديث `baileys-server/package.json`
-
-- تثبيت إصدار Baileys محدد بدل `^6.7.16` (مثلاً `6.7.9` المعروف بالاستقرار)
-- أو النزول لإصدار 6.6.x الأكثر استقراراً
+### الملفات المتأثرة
+1. `supabase/migrations/` - جدول knowledge_base جديد
+2. `supabase/functions/whatsapp-webhook/index.ts` - تحسين AI + knowledge base
+3. `baileys-server/index.js` - دعم إرسال صور من ردود AI
+4. `src/pages/BotSettings.tsx` - واجهة knowledge base جديدة
+5. `src/pages/Dashboard.tsx` - تحسين التصميم
+6. `src/pages/Inbox.tsx` - تحسينات طفيفة
+7. `src/integrations/supabase/types.ts` - أنواع الجدول الجديد
 
 ## ترتيب التنفيذ
-
-1. تعديل `baileys-server/index.js` (إصلاح makeWASocket config + retry logic)
-2. تعديل `baileys-server/package.json` (تثبيت إصدار Baileys)
-
-## بعد التنفيذ
-
-1. ارفع الملفات الجديدة على GitHub
-2. Railway سيعمل redeploy تلقائياً
-3. السيرفر سيبدأ بالإعدادات الصحيحة
-4. يجب أن يظهر QR Code خلال ثوانٍ
+1. Migration: إنشاء جدول knowledge_base
+2. تحديث webhook: تغيير AI model + knowledge base integration
+3. تحديث baileys-server: دعم إرسال صور
+4. تحديث BotSettings: واجهة knowledge base
+5. تحديث Dashboard: تحسين التصميم
+6. تحديث الأنواع في types.ts
 
