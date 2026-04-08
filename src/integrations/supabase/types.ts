@@ -444,6 +444,45 @@ export type Database = {
         }
         Relationships: []
       }
+      knowledge_base: {
+        Row: {
+          category: string
+          content: string
+          created_at: string
+          data_type: string
+          id: string
+          is_active: boolean
+          media_type: string | null
+          media_url: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          content: string
+          created_at?: string
+          data_type?: string
+          id?: string
+          is_active?: boolean
+          media_type?: string | null
+          media_url?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          content?: string
+          created_at?: string
+          data_type?: string
+          id?: string
+          is_active?: boolean
+          media_type?: string | null
+          media_url?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       members: {
         Row: {
           certification_level: string | null

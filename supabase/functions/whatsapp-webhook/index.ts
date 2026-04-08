@@ -18,7 +18,6 @@ Deno.serve(async (req) => {
     const {
       phone, name, message, whatsapp_message_id,
       media_url, media_type,
-      // WhatsApp profile data from Baileys
       push_name, profile_pic_url, whatsapp_about,
     } = body;
 
@@ -28,7 +27,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Upsert contact with WhatsApp profile data
+    // Upsert contact
     const contactData: any = {
       phone,
       name: name || push_name || phone,
@@ -64,9 +63,10 @@ Deno.serve(async (req) => {
     }
 
     // Save incoming message
+    const msgContent = message || (media_type === "image" ? "📷 صورة" : "📎 ملف");
     await supabase.from("messages").insert({
       conversation_id: conversation.id,
-      content: message || (media_type === "image" ? "📷 صورة" : "📎 ملف"),
+      content: msgContent,
       direction: "in",
       sender_type: "customer",
       whatsapp_message_id,
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
     await supabase
       .from("conversations")
       .update({
-        last_message: message || (media_type === "image" ? "📷 صورة" : "📎 ملف"),
+        last_message: msgContent,
         last_message_at: new Date().toISOString(),
         unread_count: (conversation.unread_count || 0) + 1,
         status: conversation.status === "new" ? "open" : conversation.status,
@@ -87,156 +87,15 @@ Deno.serve(async (req) => {
 
     // If AI is active, generate reply
     let aiReply = null;
+    let aiMediaUrl = null;
     if (conversation.is_ai_active) {
-      const { data: botSettings } = await supabase
-        .from("bot_settings")
-        .select("*")
-        .limit(1)
-        .single();
-
-      // Check working hours
-      if (botSettings?.working_hours_start && botSettings?.working_hours_end) {
-        const now = new Date();
-        const hours = now.getUTCHours();
-        const minutes = now.getUTCMinutes();
-        const currentTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-        if (currentTime < botSettings.working_hours_start || currentTime > botSettings.working_hours_end) {
-          if (botSettings.off_hours_message) {
-            await supabase.from("messages").insert({
-              conversation_id: conversation.id,
-              content: botSettings.off_hours_message,
-              direction: "out",
-              sender_type: "ai",
-            });
-            return new Response(
-              JSON.stringify({ success: true, ai_reply: botSettings.off_hours_message, conversation_id: conversation.id }),
-              { headers: { ...corsH, "Content-Type": "application/json" } }
-            );
-          }
-        }
-      }
-
-      // Get training data
-      const { data: trainingData } = await supabase
-        .from("training_data")
-        .select("question, answer, category")
-        .eq("is_active", true);
-
-      // Get quick replies
-      const { data: quickReplies } = await supabase
-        .from("quick_replies")
-        .select("title, content");
-
-      // Get customer memory
-      const { data: memories } = await supabase
-        .from("customer_memory")
-        .select("memory_type, key, value")
-        .eq("contact_id", contact.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
-
-      const knowledgeBase = (trainingData || [])
-        .map((t: any) => `[${t.category}] سؤال: ${t.question}\nجواب: ${t.answer}`)
-        .join("\n\n");
-
-      const quickRepliesText = (quickReplies || [])
-        .map((q: any) => `${q.title}: ${q.content}`)
-        .join("\n");
-
-      const memoryText = (memories || [])
-        .map((m: any) => `- ${m.key}: ${m.value} (${m.memory_type})`)
-        .join("\n");
-
-      const contactName = contact.whatsapp_name || contact.name || contact.phone;
-
-      const systemPrompt = `أنت ${botSettings?.bot_name || "مساعد الشركة"}، أحد أعضاء فريق العمل.
-${botSettings?.personality || "أنت مساعد ذكي ومهذب للشركة."}
-
-⚠️ تعليمات صارمة:
-- لا تقل أبداً أنك ذكاء اصطناعي أو بوت أو روبوت
-- رد كأنك شخص حقيقي من فريق العمل بأسلوب طبيعي ودود
-- استخدم أسلوب محادثة عادي مع إيموجي خفيف
-- إذا سُئلت "هل أنت بوت؟" قل "لا طبعاً، أنا من فريق خدمة العملاء 😊"
-
-👤 معلومات العميل "${contactName}":
-${memoryText || "لا توجد معلومات سابقة"}
-${contact.summary ? `ملخص: ${contact.summary}` : ""}
-
-📚 بيانات الشركة والخدمات:
-${knowledgeBase || "لا توجد بيانات تدريب بعد"}
-
-💬 ردود جاهزة يمكن الاستعانة بها:
-${quickRepliesText || "لا توجد ردود جاهزة"}
-
-📋 تعليمات الرد:
-- أجب باللغة العربية بشكل مختصر ومهني
-- إذا لم تعرف الإجابة: قل "خليني أتأكد من الزملاء وأرجعلك"
-- إذا أرسل صورة بدون نص: اسأله عن المطلوب بلطف
-- تذكر تفاصيل العميل واستخدمها في الردود`;
-
-      // Get conversation history (last 50 messages)
-      const { data: history } = await supabase
-        .from("messages")
-        .select("content, direction, sender_type, media_type")
-        .eq("conversation_id", conversation.id)
-        .order("created_at", { ascending: true })
-        .limit(50);
-
-      const messages = [
-        { role: "system", content: systemPrompt },
-        ...(history || []).map((m: any) => ({
-          role: m.direction === "in" ? "user" : "assistant",
-          content: m.media_type && !m.content ? `[${m.media_type === "image" ? "صورة" : "ملف"} مرفق]` : m.content,
-        })),
-      ];
-
-      const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${Deno.env.get("OPENROUTER_API_KEY")}`,
-          "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "",
-          "X-Title": "WhatsApp Bot",
-        },
-        body: JSON.stringify({
-          model: "stepfun/step-3.5-flash:free",
-          messages,
-          max_tokens: 500,
-        }),
-      });
-
-      const aiData = await aiResponse.json();
-      aiReply = aiData.choices?.[0]?.message?.content;
-
-      if (aiReply) {
-        // Check if AI couldn't answer → transfer to agent
-        if (aiReply.includes("أتأكد من الزملاء") || aiReply.includes("أحول لموظف") || aiReply.includes("سأحول سؤالك")) {
-          await supabase
-            .from("conversations")
-            .update({ is_ai_active: false, status: "waiting" })
-            .eq("id", conversation.id);
-        }
-
-        // Save AI reply
-        await supabase.from("messages").insert({
-          conversation_id: conversation.id,
-          content: aiReply,
-          direction: "out",
-          sender_type: "ai",
-        });
-
-        await supabase
-          .from("conversations")
-          .update({ last_message: aiReply, last_message_at: new Date().toISOString() })
-          .eq("id", conversation.id);
-
-        // Extract memory from conversation (async, don't wait)
-        extractMemory(supabase, contact.id, message, aiReply).catch(console.error);
-      }
+      const result = await generateAIReply(supabase, conversation, contact, message);
+      aiReply = result.reply;
+      aiMediaUrl = result.mediaUrl;
     }
 
     return new Response(
-      JSON.stringify({ success: true, ai_reply: aiReply, conversation_id: conversation.id }),
+      JSON.stringify({ success: true, ai_reply: aiReply, ai_media_url: aiMediaUrl, conversation_id: conversation.id }),
       { headers: { ...corsH, "Content-Type": "application/json" } }
     );
   } catch (error) {
@@ -248,24 +107,207 @@ ${quickRepliesText || "لا توجد ردود جاهزة"}
   }
 });
 
+async function generateAIReply(supabase: any, conversation: any, contact: any, message: string) {
+  const { data: botSettings } = await supabase
+    .from("bot_settings")
+    .select("*")
+    .limit(1)
+    .single();
+
+  // Check working hours
+  if (botSettings?.working_hours_start && botSettings?.working_hours_end) {
+    const now = new Date();
+    const hours = now.getUTCHours();
+    const minutes = now.getUTCMinutes();
+    const currentTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    if (currentTime < botSettings.working_hours_start || currentTime > botSettings.working_hours_end) {
+      if (botSettings.off_hours_message) {
+        await supabase.from("messages").insert({
+          conversation_id: conversation.id,
+          content: botSettings.off_hours_message,
+          direction: "out",
+          sender_type: "ai",
+        });
+        return { reply: botSettings.off_hours_message, mediaUrl: null };
+      }
+    }
+  }
+
+  // Fetch all context in parallel
+  const [trainingRes, knowledgeRes, quickRes, memoryRes, historyRes] = await Promise.all([
+    supabase.from("training_data").select("question, answer, category").eq("is_active", true),
+    supabase.from("knowledge_base").select("title, content, category, data_type, media_url, media_type").eq("is_active", true),
+    supabase.from("quick_replies").select("title, content"),
+    supabase.from("customer_memory").select("memory_type, key, value").eq("contact_id", contact.id).order("created_at", { ascending: false }).limit(20),
+    supabase.from("messages").select("content, direction, sender_type, media_type").eq("conversation_id", conversation.id).order("created_at", { ascending: true }).limit(50),
+  ]);
+
+  const trainingData = trainingRes.data || [];
+  const knowledgeData = knowledgeRes.data || [];
+  const quickReplies = quickRes.data || [];
+  const memories = memoryRes.data || [];
+  const history = historyRes.data || [];
+
+  // Build knowledge sections
+  const faqText = trainingData
+    .map((t: any) => `[${t.category}] سؤال: ${t.question}\nجواب: ${t.answer}`)
+    .join("\n\n");
+
+  const knowledgeText = knowledgeData
+    .filter((k: any) => k.data_type === "text" || k.data_type === "document")
+    .map((k: any) => `[${k.category}] ${k.title}:\n${k.content}`)
+    .join("\n\n");
+
+  const imageKnowledge = knowledgeData
+    .filter((k: any) => k.data_type === "image" && k.media_url)
+    .map((k: any) => `- ${k.title}: ${k.content} [صورة: ${k.media_url}]`)
+    .join("\n");
+
+  const faqKnowledge = knowledgeData
+    .filter((k: any) => k.data_type === "faq")
+    .map((k: any) => `سؤال: ${k.title}\nجواب: ${k.content}`)
+    .join("\n\n");
+
+  const quickRepliesText = quickReplies
+    .map((q: any) => `${q.title}: ${q.content}`)
+    .join("\n");
+
+  const memoryText = memories
+    .map((m: any) => `- ${m.key}: ${m.value} (${m.memory_type})`)
+    .join("\n");
+
+  const contactName = contact.whatsapp_name || contact.name || contact.phone;
+
+  const systemPrompt = `أنت ${botSettings?.bot_name || "مساعد الشركة"}، أحد أعضاء فريق العمل.
+${botSettings?.personality || "أنت مساعد ذكي ومهذب للشركة."}
+
+⚠️ تعليمات صارمة:
+- لا تقل أبداً أنك ذكاء اصطناعي أو بوت أو روبوت أو AI
+- رد كأنك شخص حقيقي من فريق العمل بأسلوب طبيعي ودود واحترافي
+- استخدم أسلوب محادثة عادي مع إيموجي خفيف
+- إذا سُئلت "هل أنت بوت؟" قل "لا طبعاً، أنا من فريق خدمة العملاء 😊"
+- كن ذكياً في فهم طلبات العميل حتى لو كانت غير واضحة
+- أجب بشكل مفصل ومفيد لكن بدون إطالة غير مبررة
+
+👤 معلومات العميل "${contactName}":
+${memoryText || "لا توجد معلومات سابقة عن هذا العميل"}
+${contact.summary ? `ملخص سابق: ${contact.summary}` : ""}
+
+📚 معرفة الشركة والخدمات:
+${knowledgeText || ""}
+${faqText || ""}
+${faqKnowledge || ""}
+
+🖼️ صور المنتجات المتاحة:
+${imageKnowledge || "لا توجد صور منتجات حالياً"}
+⚠️ إذا سأل العميل عن منتج وتوجد له صورة، ضع رابط الصورة في ردك بالصيغة التالية: [IMAGE:رابط_الصورة]
+هذا سيرسل الصورة للعميل تلقائياً.
+
+💬 ردود جاهزة يمكن الاستعانة بها:
+${quickRepliesText || "لا توجد ردود جاهزة"}
+
+📋 تعليمات الرد:
+- أجب باللغة العربية بشكل احترافي ومفيد
+- إذا لم تعرف الإجابة: قل "خليني أتأكد من الزملاء وأرجعلك"
+- إذا أرسل صورة بدون نص: اسأله عن المطلوب بلطف
+- تذكر تفاصيل العميل واستخدمها في الردود
+- كن proactive واقترح حلول ومنتجات ذات صلة`;
+
+  const chatMessages = [
+    { role: "system", content: systemPrompt },
+    ...(history).map((m: any) => ({
+      role: m.direction === "in" ? "user" : "assistant",
+      content: m.media_type && !m.content ? `[${m.media_type === "image" ? "صورة" : "ملف"} مرفق]` : m.content,
+    })),
+  ];
+
+  // Call Lovable AI Gateway
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    console.error("LOVABLE_API_KEY not configured");
+    return { reply: null, mediaUrl: null };
+  }
+
+  const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: chatMessages,
+      max_tokens: 1000,
+    }),
+  });
+
+  if (!aiResponse.ok) {
+    const errText = await aiResponse.text();
+    console.error("AI Gateway error:", aiResponse.status, errText);
+    return { reply: null, mediaUrl: null };
+  }
+
+  const aiData = await aiResponse.json();
+  let aiReply = aiData.choices?.[0]?.message?.content;
+
+  if (!aiReply) return { reply: null, mediaUrl: null };
+
+  // Extract image URL if present in reply
+  let aiMediaUrl = null;
+  const imageMatch = aiReply.match(/\[IMAGE:(https?:\/\/[^\]]+)\]/);
+  if (imageMatch) {
+    aiMediaUrl = imageMatch[1];
+    aiReply = aiReply.replace(/\[IMAGE:https?:\/\/[^\]]+\]/g, "").trim();
+  }
+
+  // Check if AI couldn't answer → transfer to agent
+  if (aiReply.includes("أتأكد من الزملاء") || aiReply.includes("أحول لموظف") || aiReply.includes("سأحول سؤالك")) {
+    await supabase
+      .from("conversations")
+      .update({ is_ai_active: false, status: "waiting" })
+      .eq("id", conversation.id);
+  }
+
+  // Save AI reply
+  await supabase.from("messages").insert({
+    conversation_id: conversation.id,
+    content: aiReply,
+    direction: "out",
+    sender_type: "ai",
+    media_url: aiMediaUrl || null,
+    media_type: aiMediaUrl ? "image" : null,
+  });
+
+  await supabase
+    .from("conversations")
+    .update({ last_message: aiReply, last_message_at: new Date().toISOString() })
+    .eq("id", conversation.id);
+
+  // Extract memory (async)
+  extractMemory(supabase, contact.id, message, aiReply).catch(console.error);
+
+  return { reply: aiReply, mediaUrl: aiMediaUrl };
+}
+
 async function extractMemory(supabase: any, contactId: string, userMsg: string, aiReply: string) {
   try {
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) return;
+
     const extractPrompt = `حلل الرسالة التالية واستخرج أي معلومات مهمة عن العميل.
 أرجع JSON array فقط (بدون أي نص إضافي). كل عنصر يحتوي: {"memory_type": "preference|complaint|interest|order|note", "key": "وصف قصير", "value": "القيمة"}
 إذا لم توجد معلومات مهمة، أرجع: []
 
 رسالة العميل: ${userMsg}`;
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${Deno.env.get("OPENROUTER_API_KEY")}`,
-        "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "",
-        "X-Title": "WhatsApp Bot Memory",
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "stepfun/step-3.5-flash:free",
+        model: "google/gemini-2.5-flash-lite",
         messages: [{ role: "user", content: extractPrompt }],
         max_tokens: 300,
       }),
@@ -275,7 +317,6 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
     const content = data.choices?.[0]?.message?.content?.trim();
     if (!content || content === "[]") return;
 
-    // Try parsing JSON
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       const memories = JSON.parse(jsonMatch[0]);
