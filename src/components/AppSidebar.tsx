@@ -6,6 +6,7 @@ import {
   Wifi,
   Settings,
   Smartphone,
+  Megaphone,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -26,6 +27,7 @@ const mainItems = [
   { title: "لوحة التحكم", url: "/", icon: LayoutDashboard },
   { title: "المحادثات", url: "/inbox", icon: MessageSquare },
   { title: "جهات الاتصال", url: "/contacts", icon: Users },
+  { title: "رسائل جماعية", url: "/broadcast", icon: Megaphone },
 ];
 
 const settingsItems = [

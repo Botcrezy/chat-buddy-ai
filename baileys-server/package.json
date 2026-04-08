@@ -1,0 +1,24 @@
+{
+  "name": "whatsapp-baileys-server",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot Server using Baileys",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "@hapi/boom": "^10.0.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.1",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

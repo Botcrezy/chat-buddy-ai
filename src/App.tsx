@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import Inbox from "@/pages/Inbox";
 import Contacts from "@/pages/Contacts";
 import BotSettings from "@/pages/BotSettings";
+import Broadcast from "@/pages/Broadcast";
 import Connection from "@/pages/Connection";
 import SettingsPage from "@/pages/SettingsPage";
 import Auth from "@/pages/Auth";
@@ -31,6 +32,7 @@ const App = () => (
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/bot-settings" element={<BotSettings />} />
+              <Route path="/broadcast" element={<Broadcast />} />
               <Route path="/connection" element={<Connection />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
