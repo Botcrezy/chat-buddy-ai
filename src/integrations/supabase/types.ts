@@ -61,6 +61,7 @@ export type Database = {
       bot_settings: {
         Row: {
           auto_reply_enabled: boolean
+          baileys_server_url: string | null
           bot_name: string
           created_at: string
           id: string
@@ -73,6 +74,7 @@ export type Database = {
         }
         Insert: {
           auto_reply_enabled?: boolean
+          baileys_server_url?: string | null
           bot_name?: string
           created_at?: string
           id?: string
@@ -85,6 +87,7 @@ export type Database = {
         }
         Update: {
           auto_reply_enabled?: boolean
+          baileys_server_url?: string | null
           bot_name?: string
           created_at?: string
           id?: string
