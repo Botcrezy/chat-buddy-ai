@@ -46,23 +46,12 @@ export default function SettingsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>بداية العمل</Label>
-              <Input type="time" value={settings?.working_hours_start || "09:00"} onChange={(e) => setSettings({ ...settings, working_hours_start: e.target.value })} />
+          <div className="flex items-center justify-between p-3 rounded-xl bg-green-500/10 border border-green-500/30">
+            <div>
+              <Label className="font-medium text-green-700">🟢 البوت يعمل 24 ساعة متواصلة</Label>
+              <p className="text-xs text-muted-foreground">مرام أونلاين دايماً وبترد على العملاء في أي وقت</p>
             </div>
-            <div className="space-y-2">
-              <Label>نهاية العمل</Label>
-              <Input type="time" value={settings?.working_hours_end || "17:00"} onChange={(e) => setSettings({ ...settings, working_hours_end: e.target.value })} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>رسالة خارج أوقات العمل</Label>
-            <Textarea
-              value={settings?.off_hours_message || ""}
-              onChange={(e) => setSettings({ ...settings, off_hours_message: e.target.value })}
-              rows={3}
-            />
+            <Switch checked disabled />
           </div>
         </CardContent>
       </Card>
