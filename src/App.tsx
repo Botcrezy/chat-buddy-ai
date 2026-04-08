@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import Inbox from "@/pages/Inbox";
 import Contacts from "@/pages/Contacts";
 import BotSettings from "@/pages/BotSettings";
+import Broadcast from "@/pages/Broadcast";
 import Connection from "@/pages/Connection";
 import SettingsPage from "@/pages/SettingsPage";
 import Auth from "@/pages/Auth";
