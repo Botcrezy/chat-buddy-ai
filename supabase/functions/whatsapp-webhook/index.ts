@@ -127,14 +127,16 @@ ${quickRepliesText || "لا توجد ردود جاهزة"}
         })),
       ];
 
-      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${Deno.env.get("LOVABLE_API_KEY")}`,
+          Authorization: `Bearer ${Deno.env.get("OPENROUTER_API_KEY")}`,
+          "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "",
+          "X-Title": "WhatsApp Bot",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "stepfun/step-3.5-flash:free",
           messages,
           max_tokens: 500,
         }),
