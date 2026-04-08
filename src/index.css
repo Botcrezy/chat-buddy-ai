@@ -83,6 +83,12 @@
     --border: 150 15% 18%;
     --input: 150 15% 18%;
     --ring: 142 70% 45%;
+
+    --whatsapp-chat-bg: 150 15% 12%;
+    --message-out: 142 30% 20%;
+    --message-in: 150 15% 16%;
+    --online: 142 70% 45%;
+    --offline: 0 0% 40%;
   }
 }
 

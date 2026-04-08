@@ -5,12 +5,12 @@ import { MessageSquare, Users, Bot, Wifi, WifiOff, TrendingUp, Clock, ArrowUpRig
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "@/integrations/supabase/client";
 
-const weekDays = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+const weekDaysInit = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
 
 export default function Dashboard() {
   const [stats, setStats] = useState({ messages: 0, contacts: 0, aiReplies: 0, connected: false, knowledgeItems: 0, memories: 0, profiles: 0 });
   const [recentConversations, setRecentConversations] = useState<any[]>([]);
-  const [weeklyData, setWeeklyData] = useState(weekDays.map(d => ({ day: d, messages: 0, ai: 0 })));
+  const [weeklyData, setWeeklyData] = useState(weekDaysInit.map(d => ({ day: d, messages: 0, ai: 0 })));
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -38,6 +38,42 @@ export default function Dashboard() {
         profiles: (profilesRes as any).count || 0,
       });
       setRecentConversations(convRes.data || []);
+
+      // Fetch weekly data
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - 6);
+      weekStart.setHours(0, 0, 0, 0);
+
+      const { data: weekMessages } = await supabase
+        .from("messages")
+        .select("created_at, sender_type")
+        .gte("created_at", weekStart.toISOString())
+        .order("created_at", { ascending: true });
+
+      if (weekMessages && weekMessages.length > 0) {
+        const dayMap: Record<number, { messages: number; ai: number }> = {};
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - 6 + i);
+          dayMap[d.getDay()] = { messages: 0, ai: 0 };
+        }
+        for (const msg of weekMessages) {
+          const dayIndex = new Date(msg.created_at).getDay();
+          if (dayMap[dayIndex]) {
+            dayMap[dayIndex].messages++;
+            if (msg.sender_type === "ai") dayMap[dayIndex].ai++;
+          }
+        }
+        const dayNames = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+        const chartData = [];
+        for (let i = 0; i < 7; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() - 6 + i);
+          const idx = d.getDay();
+          chartData.push({ day: dayNames[idx], messages: dayMap[idx]?.messages || 0, ai: dayMap[idx]?.ai || 0 });
+        }
+        setWeeklyData(chartData);
+      }
     };
     fetchStats();
   }, []);
@@ -104,12 +140,17 @@ export default function Dashboard() {
                     <stop offset="0%" stopColor="hsl(142, 70%, 35%)" stopOpacity={0.3} />
                     <stop offset="100%" stopColor="hsl(142, 70%, 35%)" stopOpacity={0} />
                   </linearGradient>
+                  <linearGradient id="aiGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(262, 70%, 50%)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="hsl(262, 70%, 50%)" stopOpacity={0} />
+                  </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="day" className="text-xs" tick={{ fontSize: 11 }} />
                 <YAxis className="text-xs" tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={{ borderRadius: 16, border: "1px solid hsl(140, 15%, 88%)", fontSize: 13, direction: "rtl" }} />
                 <Area type="monotone" dataKey="messages" stroke="hsl(142, 70%, 35%)" fill="url(#msgGradient)" strokeWidth={2.5} name="الرسائل" />
+                <Area type="monotone" dataKey="ai" stroke="hsl(262, 70%, 50%)" fill="url(#aiGradient)" strokeWidth={2} name="ردود مرام" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
