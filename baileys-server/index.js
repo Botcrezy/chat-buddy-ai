@@ -9,6 +9,15 @@ require('dotenv').config();
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
+// CORS for dashboard access
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 const PORT = process.env.PORT || 3001;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const STATUS_URL = process.env.STATUS_URL;
@@ -16,12 +25,33 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
 let sock = null;
 let qrCode = null;
+let isConnecting = false;
+
+// In-memory log buffer for remote debugging
+const logBuffer = [];
+const MAX_LOGS = 100;
+
+function addLog(level, message, data = null) {
+  const entry = {
+    time: new Date().toISOString(),
+    level,
+    message,
+    ...(data && { data: typeof data === 'object' ? JSON.stringify(data).slice(0, 500) : data }),
+  };
+  logBuffer.push(entry);
+  if (logBuffer.length > MAX_LOGS) logBuffer.shift();
+  console[level === 'error' ? 'error' : 'log'](`[${level.toUpperCase()}] ${message}`, data || '');
+}
 
 const logger = pino({ level: 'info' });
 
 async function updateStatus(data) {
+  if (!STATUS_URL) {
+    addLog('warn', 'STATUS_URL not configured, skipping status update');
+    return;
+  }
   try {
-    await fetch(STATUS_URL, {
+    const res = await fetch(STATUS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -29,12 +59,17 @@ async function updateStatus(data) {
       },
       body: JSON.stringify({ session_id: 'default', ...data }),
     });
+    addLog('info', `Status update: ${data.status}`, { httpStatus: res.status });
   } catch (e) {
-    console.error('Failed to update status:', e.message);
+    addLog('error', 'Failed to update status', e.message);
   }
 }
 
 async function sendWebhook(data) {
+  if (!WEBHOOK_URL) {
+    addLog('warn', 'WEBHOOK_URL not configured');
+    return null;
+  }
   try {
     const res = await fetch(WEBHOOK_URL, {
       method: 'POST',
@@ -46,152 +81,177 @@ async function sendWebhook(data) {
     });
     return await res.json();
   } catch (e) {
-    console.error('Webhook error:', e.message);
+    addLog('error', 'Webhook error', e.message);
     return null;
   }
 }
 
 async function startSocket() {
-  const { state, saveCreds } = await useMultiFileAuthState('./auth_session');
-  const { version } = await fetchLatestBaileysVersion();
+  if (isConnecting) {
+    addLog('warn', 'Already connecting, skipping duplicate startSocket call');
+    return;
+  }
+  isConnecting = true;
+  addLog('info', '🔄 Starting WhatsApp socket...');
+  await updateStatus({ status: 'starting', qr_code: null });
 
-  sock = makeWASocket({
-    version,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    logger,
-    printQRInTerminal: true,
-    generateHighQualityLinkPreview: true,
-  });
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState('./auth_session');
+    addLog('info', 'Auth state loaded successfully');
 
-  sock.ev.on('creds.update', saveCreds);
+    const { version } = await fetchLatestBaileysVersion();
+    addLog('info', `Baileys version: ${version.join('.')}`);
 
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      logger,
+      printQRInTerminal: true,
+      generateHighQualityLinkPreview: true,
+      browser: ['WhatsApp Bot', 'Chrome', '120.0.0'],
+    });
 
-    if (qr) {
-      qrCode = qr;
-      console.log('📱 QR Code generated - scan with WhatsApp');
+    sock.ev.on('creds.update', saveCreds);
 
-      // Convert QR to data URL for frontend display
-      const QRCode = require('qrcode');
-      const qrDataUrl = await QRCode.toDataURL(qr);
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      addLog('info', 'Connection update', { connection, hasQR: !!qr, lastDisconnectCode: lastDisconnect?.error?.output?.statusCode });
 
-      await updateStatus({ status: 'waiting_qr', qr_code: qrDataUrl });
-    }
+      if (qr) {
+        qrCode = qr;
+        addLog('info', '📱 QR Code generated - scan with WhatsApp');
 
-    if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom)
-        ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
-        : true;
-
-      console.log('Connection closed. Reconnecting:', shouldReconnect);
-      await updateStatus({ status: 'disconnected', qr_code: null });
-
-      if (shouldReconnect) {
-        setTimeout(startSocket, 5000);
-      }
-    }
-
-    if (connection === 'open') {
-      qrCode = null;
-      const phoneNumber = sock.user?.id?.split(':')[0] || '';
-      console.log('✅ Connected! Phone:', phoneNumber);
-
-      await updateStatus({
-        status: 'connected',
-        phone_number: phoneNumber,
-        qr_code: null,
-      });
-    }
-  });
-
-  // Handle incoming messages
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
-    for (const msg of messages) {
-      if (msg.key.fromMe) continue;
-      if (!msg.message) continue;
-
-      const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
-      if (!phone || phone.includes('@g.us')) continue; // Skip groups
-
-      const pushName = msg.pushName || '';
-
-      // Get profile picture
-      let profilePicUrl = null;
-      try {
-        profilePicUrl = await sock.profilePictureUrl(msg.key.remoteJid, 'image');
-      } catch { }
-
-      // Get status/about
-      let whatsappAbout = '';
-      try {
-        const status = await sock.fetchStatus(msg.key.remoteJid);
-        whatsappAbout = status?.status || '';
-      } catch { }
-
-      // Extract message content
-      let textContent = '';
-      let mediaUrl = null;
-      let mediaType = null;
-
-      if (msg.message.conversation) {
-        textContent = msg.message.conversation;
-      } else if (msg.message.extendedTextMessage) {
-        textContent = msg.message.extendedTextMessage.text;
-      } else if (msg.message.imageMessage) {
-        textContent = msg.message.imageMessage.caption || '';
-        mediaType = 'image';
-        // Download and convert to base64
         try {
-          const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-        } catch (e) {
-          console.error('Media download error:', e.message);
-        }
-      } else if (msg.message.documentMessage) {
-        textContent = msg.message.documentMessage.caption || msg.message.documentMessage.fileName || '';
-        mediaType = 'document';
-      } else if (msg.message.audioMessage) {
-        mediaType = 'audio';
-      } else if (msg.message.videoMessage) {
-        textContent = msg.message.videoMessage.caption || '';
-        mediaType = 'video';
-      }
-
-      if (!textContent && !mediaType) continue;
-
-      console.log(`📩 Message from ${pushName} (${phone}): ${textContent || `[${mediaType}]`}`);
-
-      // Send to webhook
-      const result = await sendWebhook({
-        phone,
-        name: pushName,
-        message: textContent,
-        whatsapp_message_id: msg.key.id,
-        push_name: pushName,
-        profile_pic_url: profilePicUrl,
-        whatsapp_about: whatsappAbout,
-        media_url: mediaUrl,
-        media_type: mediaType,
-      });
-
-      // If AI replied, send the reply back
-      if (result?.ai_reply) {
-        try {
-          await sock.sendMessage(msg.key.remoteJid, { text: result.ai_reply });
-          console.log(`🤖 AI Reply sent to ${phone}`);
-        } catch (e) {
-          console.error('Send reply error:', e.message);
+          const QRCode = require('qrcode');
+          const qrDataUrl = await QRCode.toDataURL(qr);
+          await updateStatus({ status: 'waiting_qr', qr_code: qrDataUrl });
+        } catch (qrErr) {
+          addLog('error', 'QR code generation failed', qrErr.message);
         }
       }
-    }
-  });
+
+      if (connection === 'close') {
+        isConnecting = false;
+        const statusCode = (lastDisconnect?.error instanceof Boom)
+          ? lastDisconnect.error.output.statusCode
+          : 0;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+        addLog('info', `Connection closed. Code: ${statusCode}, Reconnecting: ${shouldReconnect}`);
+        await updateStatus({ status: 'disconnected' });
+
+        if (shouldReconnect) {
+          const delay = statusCode === 515 ? 30000 : 10000; // rate limit = 30s, else 10s
+          addLog('info', `Reconnecting in ${delay / 1000}s...`);
+          setTimeout(startSocket, delay);
+        } else {
+          addLog('warn', '⚠️ Logged out! Clear auth_session and restart to re-scan QR');
+        }
+      }
+
+      if (connection === 'open') {
+        isConnecting = false;
+        qrCode = null;
+        const phoneNumber = sock.user?.id?.split(':')[0] || '';
+        addLog('info', `✅ Connected! Phone: ${phoneNumber}`);
+
+        await updateStatus({
+          status: 'connected',
+          phone_number: phoneNumber,
+          qr_code: null,
+        });
+      }
+    });
+
+    // Handle incoming messages
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      if (type !== 'notify') return;
+
+      for (const msg of messages) {
+        if (msg.key.fromMe) continue;
+        if (!msg.message) continue;
+
+        const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
+        if (!phone || phone.includes('@g.us')) continue;
+
+        const pushName = msg.pushName || '';
+
+        let profilePicUrl = null;
+        try {
+          profilePicUrl = await sock.profilePictureUrl(msg.key.remoteJid, 'image');
+        } catch { }
+
+        let whatsappAbout = '';
+        try {
+          const status = await sock.fetchStatus(msg.key.remoteJid);
+          whatsappAbout = status?.status || '';
+        } catch { }
+
+        let textContent = '';
+        let mediaUrl = null;
+        let mediaType = null;
+
+        if (msg.message.conversation) {
+          textContent = msg.message.conversation;
+        } else if (msg.message.extendedTextMessage) {
+          textContent = msg.message.extendedTextMessage.text;
+        } else if (msg.message.imageMessage) {
+          textContent = msg.message.imageMessage.caption || '';
+          mediaType = 'image';
+          try {
+            const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+            const buffer = await downloadMediaMessage(msg, 'buffer', {});
+            mediaUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+          } catch (e) {
+            addLog('error', 'Media download error', e.message);
+          }
+        } else if (msg.message.documentMessage) {
+          textContent = msg.message.documentMessage.caption || msg.message.documentMessage.fileName || '';
+          mediaType = 'document';
+        } else if (msg.message.audioMessage) {
+          mediaType = 'audio';
+        } else if (msg.message.videoMessage) {
+          textContent = msg.message.videoMessage.caption || '';
+          mediaType = 'video';
+        }
+
+        if (!textContent && !mediaType) continue;
+
+        addLog('info', `📩 Message from ${pushName} (${phone}): ${textContent || `[${mediaType}]`}`);
+
+        const result = await sendWebhook({
+          phone,
+          name: pushName,
+          message: textContent,
+          whatsapp_message_id: msg.key.id,
+          push_name: pushName,
+          profile_pic_url: profilePicUrl,
+          whatsapp_about: whatsappAbout,
+          media_url: mediaUrl,
+          media_type: mediaType,
+        });
+
+        if (result?.ai_reply) {
+          try {
+            await sock.sendMessage(msg.key.remoteJid, { text: result.ai_reply });
+            addLog('info', `🤖 AI Reply sent to ${phone}`);
+          } catch (e) {
+            addLog('error', 'Send reply error', e.message);
+          }
+        }
+      }
+    });
+
+  } catch (err) {
+    isConnecting = false;
+    addLog('error', '❌ startSocket() crashed', err.message);
+    await updateStatus({ status: 'error', qr_code: null });
+    addLog('info', 'Retrying in 15s after crash...');
+    setTimeout(startSocket, 15000);
+  }
 }
 
 // API: Send message
@@ -201,20 +261,15 @@ app.post('/send', async (req, res) => {
     if (!phone || (!message && !media_url)) {
       return res.status(400).json({ error: 'phone and (message or media_url) required' });
     }
-
     const jid = `${phone}@s.whatsapp.net`;
-
     if (media_type === 'image' && media_url) {
-      await sock.sendMessage(jid, {
-        image: { url: media_url },
-        caption: message || '',
-      });
+      await sock.sendMessage(jid, { image: { url: media_url }, caption: message || '' });
     } else {
       await sock.sendMessage(jid, { text: message });
     }
-
     res.json({ success: true });
   } catch (e) {
+    addLog('error', 'Send API error', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -226,7 +281,6 @@ app.post('/broadcast', async (req, res) => {
     if (!recipients || !message) {
       return res.status(400).json({ error: 'recipients and message required' });
     }
-
     const results = [];
     for (const phone of recipients) {
       try {
@@ -237,13 +291,11 @@ app.post('/broadcast', async (req, res) => {
           await sock.sendMessage(jid, { text: message });
         }
         results.push({ phone, status: 'sent' });
-        // Random delay 2-5 seconds between messages
         await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
       } catch (e) {
         results.push({ phone, status: 'failed', error: e.message });
       }
     }
-
     res.json({ success: true, results });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -256,16 +308,25 @@ app.get('/status', (req, res) => {
     connected: sock?.user ? true : false,
     phone: sock?.user?.id?.split(':')[0] || null,
     qr: qrCode || null,
+    connecting: isConnecting,
   });
+});
+
+// API: Get logs (remote debugging)
+app.get('/logs', (req, res) => {
+  res.json({ logs: logBuffer.slice(-50) });
 });
 
 // API: Restart connection
 app.post('/restart', async (req, res) => {
   try {
+    addLog('info', '🔄 Restart requested via API');
     if (sock) {
       sock.end();
+      sock = null;
     }
-    await startSocket();
+    isConnecting = false;
+    setTimeout(startSocket, 2000);
     res.json({ success: true, message: 'Restarting...' });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -278,6 +339,8 @@ app.post('/logout', async (req, res) => {
     await sock?.logout();
     fs.rmSync('./auth_session', { recursive: true, force: true });
     await updateStatus({ status: 'disconnected', qr_code: null, phone_number: null });
+    sock = null;
+    isConnecting = false;
     res.json({ success: true });
     setTimeout(startSocket, 2000);
   } catch (e) {
@@ -287,10 +350,16 @@ app.post('/logout', async (req, res) => {
 
 // Health check
 app.get('/', (req, res) => {
-  res.json({ status: 'running', connected: !!sock?.user });
+  res.json({
+    status: 'running',
+    connected: !!sock?.user,
+    connecting: isConnecting,
+    uptime: process.uptime(),
+    logs_count: logBuffer.length,
+  });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Baileys server running on port ${PORT}`);
+  addLog('info', `🚀 Baileys server running on port ${PORT}`);
   startSocket();
 });

@@ -1,0 +1,1 @@
+ALTER TABLE public.bot_settings ADD COLUMN IF NOT EXISTS baileys_server_url text;
