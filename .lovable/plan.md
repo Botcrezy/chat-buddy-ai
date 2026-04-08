@@ -1,175 +1,48 @@
-# خطة تطوير شاملة للنظام - ميزات متقدمة
 
-## ملخص
 
-تحسين النظام بإضافة: ذاكرة عملاء قوية، قراءة بروفايل الواتساب، دعم الصور والميديا، رسائل جماعية (Broadcast)، متابعة تلقائية للعملاء، وشخصية بوت بشرية متقدمة. مع شرح تفصيلي لنشر سيرفر Baileys.
+# تشخيص وإصلاح مشكلة اتصال سيرفر Baileys
 
----
+## التشخيص
 
-## المرحلة 1: قاعدة البيانات - جداول جديدة
+السيرفر على Railway **شغال فعلاً** ويستجيب:
+- `https://bot-production-5d5e.up.railway.app/` → `{"status":"running","connected":false}`
+- السيرفر يرسل تحديثات الحالة لـ Supabase بنجاح (200 OK) كل 5 ثواني
+- حالة الـ WhatsApp في قاعدة البيانات: `"disconnected"` مع `qr_code: null`
 
-### جدول `customer_memory` - ذاكرة العملاء
+**المشكلة**: السيرفر في حلقة إعادة اتصال - الـ socket يفتح ويُغلق فوراً بدون توليد QR code. هذا غالباً بسبب واحد من:
+1. مشكلة في مكتبة Baileys مع بيئة Railway
+2. عدم وجود error handling كافي فتظهر كأنها crash loop صامتة
 
-```sql
-- contact_id (uuid, FK → contacts)
-- memory_type: 'preference' | 'complaint' | 'interest' | 'order' | 'note'
-- key (text) -- مثل "المنتج المفضل"
-- value (text) -- مثل "باقة بريميوم"
-- extracted_from_message_id (uuid, nullable)
-- created_by: 'ai' | 'agent'
-```
+## الحل
 
-### جدول `broadcast_campaigns` - الرسائل الجماعية
+### 1. تحسين سيرفر Baileys (baileys-server/index.js)
+- إضافة try/catch شامل حول `startSocket()` مع logging تفصيلي
+- إضافة endpoint `/logs` لعرض آخر 50 سطر log من الذاكرة (مفيد للتشخيص من بعيد)
+- إضافة delay أطول قبل إعادة المحاولة (10 ثواني بدل 5)
+- إضافة حالة `"starting"` عند بدء الاتصال حتى نعرف إنه بيحاول
+- إصلاح: لا يمسح QR code عند إغلاق الاتصال (يبقى متاح للمسح)
 
-```sql
-- title, content, media_url, media_type
-- target_category (text) -- فلتر الفئة المستهدفة
-- status: 'draft' | 'sending' | 'completed'
-- total_recipients, sent_count, failed_count
-- scheduled_at (nullable), sent_at
-```
+### 2. تحسين صفحة الاتصال (Connection.tsx)
+- إضافة **Auto-refresh** كل 5 ثواني لجلب حالة QR تلقائياً
+- إضافة **زر إعادة تشغيل** يستدعي `/restart` على سيرفر Railway
+- عرض حالة السيرفر مباشرة (متصل بالسيرفر / لا) بجانب حالة الواتساب
+- إضافة حقل إدخال عنوان السيرفر مباشرة في صفحة الاتصال
 
-### جدول `broadcast_recipients` - تفاصيل الإرسال
+### 3. ربط صفحة الإعدادات (SettingsPage.tsx)
+- حفظ عنوان السيرفر في `bot_settings` (إضافة عمود `baileys_server_url`)
+- استخدام العنوان المحفوظ في صفحة الاتصال
 
-```sql
-- campaign_id, contact_id
-- status: 'pending' | 'sent' | 'failed'
-- sent_at, error_message
-```
-
-### جدول `followup_rules` - قواعد المتابعة التلقائية
-
-```sql
-- name, trigger_type: 'no_reply' | 'after_purchase' | 'periodic'
-- delay_hours (int), message_template (text)
-- is_active (boolean), target_category
-```
-
-### تعديل جدول `contacts`
-
-- إضافة: `whatsapp_name`, `whatsapp_about`, `whatsapp_avatar_url`, `summary` (ملخص AI للعميل)
-
-### تعديل جدول `messages`
-
-- التأكد من دعم `media_url` و `media_type` (موجودين بالفعل)
-
----
-
-## المرحلة 2: Edge Function - `whatsapp-webhook` محسّن
-
-التغييرات الرئيسية:
-
-1. **استقبال بيانات البروفايل** من Baileys (الاسم، الصورة، الحالة) وتخزينها في contacts
-2. **استقبال الصور والملفات** - حفظ media_url و media_type في الرسائل
-3. **ذاكرة عملاء ذكية** - بعد كل رد AI، يستخرج معلومات مهمة من المحادثة ويحفظها في `customer_memory`
-4. **System Prompt محسّن** يشمل:
-  - شخصية البوت (مبيعات/دعم فني) بأسلوب بشري طبيعي
-  - ذاكرة العميل السابقة كاملة
-  - ملخص العميل
-  - تعليمات عدم إظهار أنه بوت
-  - تاريخ المحادثة (آخر 50 رسالة بدل 20)
-
-### System Prompt المحسّن:
-
-```
-أنت {bot_name}، أحد أعضاء فريق {personality}.
-لا تقل أبداً أنك ذكاء اصطناعي أو بوت.
-رد كأنك شخص حقيقي بأسلوب طبيعي ودود.
-
-معلومات عن العميل {contact_name}:
-- {customer_memory entries}
-- ملخص: {contact.summary}
-
-بيانات الشركة: {training_data}
-ردود جاهزة: {quick_replies}
-
-إذا سُئلت عن شيء لا تعرفه: قل "خليني أتأكد من الزملاء وأرجعلك"
-```
-
----
-
-## المرحلة 3: Edge Function جديدة - `broadcast-send`
-
-- تستقبل campaign_id
-- تجلب العملاء المستهدفين (حسب الفلتر)
-- تبعت الرسائل عبر سيرفر Baileys واحدة واحدة مع delay
-- تحدّث حالة كل recipient
-
----
-
-## المرحلة 4: Edge Function جديدة - `followup-check`
-
-- يتم استدعاؤها دورياً (Cron أو من Baileys server)
-- تفحص العملاء اللي محتاجين متابعة حسب `followup_rules`
-- تبعت رسائل المتابعة تلقائياً
-
----
-
-## المرحلة 5: Frontend - صفحات جديدة ومحسّنة
-
-### 1. صفحة Inbox محسّنة
-
-- عرض صور الميديا في الشات
-- زر إرفاق صورة/ملف
-- لوحة جانبية لبيانات العميل (بروفايل واتساب + ذاكرة + ملخص)
-
-### 2. صفحة Broadcast جديدة
-
-- إنشاء حملة رسائل جماعية
-- اختيار الفئة المستهدفة
-- إرفاق صورة
-- متابعة حالة الإرسال (progress bar)
-
-### 3. صفحة Contacts محسّنة
-
-- عرض صورة البروفايل من واتساب
-- عرض ملخص AI للعميل
-- عرض ذاكرة العميل (تفضيلاته، اهتماماته)
-
-### 4. صفحة Bot Settings محسّنة
-
-- إضافة تبويب "المتابعة التلقائية" لإعداد followup_rules
-- إضافة تبويب "الشخصيات" لاختيار نوع الشخصية (مبيعات/دعم/عام)
-
-### 5. إضافة رابط Broadcast في الـ Sidebar
-
----
-
-## المرحلة 6: تحديث سيرفر Baileys
-
-إضافة في `baileys-server/index.js`:
-
-1. **إرسال بيانات البروفايل** مع كل رسالة (pushName, profilePicUrl, status)
-2. **استقبال الصور** وتحويلها لـ base64 أو رفعها وإرسال الرابط
-3. **API endpoint `/broadcast**` لاستقبال أوامر الإرسال الجماعي مع delay بين الرسائل
-4. **Cron job** لاستدعاء `followup-check` كل ساعة
-
----
-
-## المرحلة 7: شرح تفصيلي لنشر سيرفر Baileys
-
-سيتم إنشاء ملف `DEPLOYMENT_GUIDE.md` شامل يتضمن:
-
-1. **إنشاء  مجاني** على reilway(خطوة بخطوة)
-2. **رفع الكود**
-3. **ضبط المتغيرات**: ملف `.env` مع:
-  - `SUPABASE_URL` و `SUPABASE_ANON_KEY`
-  - `WEBHOOK_URL` = `https://mobxdcedtckzvusazdjg.supabase.co/functions/v1/whatsapp-webhook`
-  - `STATUS_URL` = `https://mobxdcedtckzvusazdjg.supabase.co/functions/v1/whatsapp-status`
-4. **التشغيل**
-5. **الربط من اللوحة**: إدخال `http://reilway.api.com` في صفحة الإعدادات
-6. **مسح QR Code** من صفحة الاتصال
-
----
+### 4. Migration بسيطة
+- إضافة عمود `baileys_server_url` في جدول `bot_settings`
 
 ## ترتيب التنفيذ
 
-1. Migration: جداول جديدة + تعديل contacts
-2. تحديث `whatsapp-webhook` (بروفايل + ذاكرة + prompt محسّن + ميديا)
-3. إنشاء `broadcast-send` edge function
-4. إنشاء `followup-check` edge function
-5. تحديث Inbox (ميديا + لوحة عميل جانبية)
-6. إنشاء صفحة Broadcast
-7. تحديث Contacts + Bot Settings
-8. تحديث كود Baileys server
-9. إنشاء DEPLOYMENT_GUIDE.md
+1. Migration: إضافة `baileys_server_url` لـ bot_settings
+2. تحديث `baileys-server/index.js` (error handling + /logs endpoint)
+3. تحديث `Connection.tsx` (auto-refresh + restart + server URL)
+4. تحديث `SettingsPage.tsx` (حفظ server URL)
+
+## ملاحظة مهمة
+
+بعد التنفيذ، ستحتاج تعمل **Redeploy** على Railway بالكود الجديد. ممكن تعمل كده بعمل push جديد للـ GitHub repo المربوط بـ Railway.
+
