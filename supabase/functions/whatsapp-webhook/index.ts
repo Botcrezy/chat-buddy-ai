@@ -281,9 +281,23 @@ ${quickRepliesText || "لا يوجد"}
 
   let aiReply: string | null = null;
 
+  // Add a final instruction to prevent reasoning output
+  chatMessages.push({ role: "user", content: message || "مرحبا" });
+  // Remove duplicate if already added
+  if (chatMessages.length > 2 && chatMessages[chatMessages.length - 1].content === chatMessages[chatMessages.length - 2].content) {
+    chatMessages.pop();
+  }
+
   for (const model of models) {
     try {
       console.log(`Trying model: ${model}`);
+      const requestBody: any = {
+        model,
+        messages: chatMessages,
+        max_tokens: 300,
+        temperature: 0.7,
+      };
+
       const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -292,12 +306,7 @@ ${quickRepliesText || "لا يوجد"}
           "HTTP-Referer": "https://sityai.lovable.app",
           "X-Title": "Sity Cloud Bot",
         },
-        body: JSON.stringify({
-          model,
-          messages: chatMessages,
-          max_tokens: 400,
-          temperature: 0.7,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!aiResponse.ok) {
