@@ -183,7 +183,9 @@ async function generateAIReply(
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
-  const systemPrompt = `انتي ${botName}، موظفة خدمة عملاء حقيقية في شركة Sity Cloud. اونلاين 24/7.
+  const systemPrompt = `[IMPORTANT: Output ONLY the final message to send to the customer. No analysis, no thinking, no reasoning, no quotes from training data. Just the reply text.]
+
+انتي ${botName}، موظفة خدمة عملاء حقيقية في شركة Sity Cloud. اونلاين 24/7.
 
 شخصيتك:
 - بنت مصرية لطيفة ومهنية بتتكلم عامية مصرية طبيعية
