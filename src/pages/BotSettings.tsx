@@ -405,9 +405,38 @@ export default function BotSettings() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* Training Data */}
+          {/* Edit Knowledge Item Dialog */}
+          <Dialog open={!!editingKB} onOpenChange={(open) => !open && setEditingKB(null)}>
+            <DialogContent dir="rtl" className="max-w-lg">
+              <DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-primary" /> تعديل عنصر</DialogTitle></DialogHeader>
+              {editingKB && (
+                <div className="space-y-4 mt-2">
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">العنوان</Label>
+                    <Input value={editingKB.title} onChange={(e) => setEditingKB({ ...editingKB, title: e.target.value })} className="bg-muted/30" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">المحتوى</Label>
+                    <Textarea rows={4} value={editingKB.content} onChange={(e) => setEditingKB({ ...editingKB, content: e.target.value })} className="bg-muted/30 resize-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">التصنيف</Label>
+                    <Input value={editingKB.category} onChange={(e) => setEditingKB({ ...editingKB, category: e.target.value })} className="bg-muted/30" />
+                  </div>
+                  {editingKB.media_url && (
+                    <div className="rounded-xl overflow-hidden border bg-muted/20">
+                      <img src={editingKB.media_url} className="w-full h-32 object-cover" />
+                    </div>
+                  )}
+                  <Button onClick={updateKnowledgeItem} className="w-full rounded-xl gap-2">
+                    <Save className="h-4 w-4" /> حفظ التعديلات
+                  </Button>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
         <TabsContent value="training" className="space-y-4 mt-4">
           <Card className="border-0 shadow-md">
             <CardHeader>
