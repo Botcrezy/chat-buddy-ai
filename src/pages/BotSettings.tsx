@@ -389,6 +389,9 @@ export default function BotSettings() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingKB({ ...item })}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
                             <Switch checked={item.is_active} onCheckedChange={() => toggleKnowledgeItem(item.id, item.is_active)} />
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteKnowledgeItem(item.id)}>
                               <Trash2 className="h-3.5 w-3.5" />
