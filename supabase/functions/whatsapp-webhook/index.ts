@@ -63,14 +63,12 @@ Deno.serve(async (req) => {
     }
 
     // === AUTO-REACTIVATE AI ===
-    // If AI is off (from escalation), check if enough time passed to reactivate
     if (!conversation.is_ai_active) {
       const lastMsgTime = conversation.last_message_at ? new Date(conversation.last_message_at).getTime() : 0;
       const now = Date.now();
       const hoursSinceLastMsg = (now - lastMsgTime) / (1000 * 60 * 60);
       
       if (hoursSinceLastMsg >= 1) {
-        // More than 1 hour since last message - reactivate AI
         console.log(`Auto-reactivating AI for conversation ${conversation.id} (${hoursSinceLastMsg.toFixed(1)}h since last msg)`);
         await supabase.from("conversations")
           .update({ is_ai_active: true, status: "open" })
@@ -110,7 +108,7 @@ Deno.serve(async (req) => {
       const result = await generateAIReply(supabase, conversation, contact, message, media_url, media_type);
       aiReply = result.reply;
       aiMediaUrl = result.mediaUrl;
-      console.log(`AI reply result: ${aiReply ? aiReply.slice(0, 80) : "null"}`);
+      console.log(`AI reply result: ${aiReply ? aiReply.slice(0, 100) : "null"}`);
     } else {
       console.log(`AI is OFF for conversation ${conversation.id}, no reply generated`);
     }
@@ -162,17 +160,30 @@ function needsWebSearch(msg: string, knowledgeText: string): boolean {
   return false;
 }
 
-// ===== Detect escalation request =====
+// ===== Detect escalation request (STRICT) =====
 function isEscalationRequest(msg: string): boolean {
   if (!msg) return false;
+  // Only EXPLICIT human support requests - not vague phrases
   const triggers = [
-    "دعم بشري", "موظف", "حد يكلمني", "شخص حقيقي", "مدير", "شكوى",
-    "عايز اكلم حد", "كلمني بحد", "ابعتلي حد", "مش فاهم", "مش راضي",
-    "human", "agent", "support", "representative", "manager",
-    "عايز حد بشري", "حد من الفريق", "ادارة", "مسؤول",
+    "دعم بشري", "كلمني بحد", "عايز اكلم حد بشري", "عايز حد بشري",
+    "حد من الفريق يكلمني", "ابعتلي حد من الفريق",
+    "شخص حقيقي", "كلمني بإنسان",
+    "human support", "talk to agent", "real person", "representative",
   ];
   const lower = msg.toLowerCase();
   return triggers.some(t => lower.includes(t));
+}
+
+// ===== Detect abusive/rude messages =====
+function isAbusiveMessage(msg: string): boolean {
+  if (!msg) return false;
+  const lower = msg.toLowerCase();
+  const abuseWords = [
+    "نصابين", "نصب", "حرامية", "سرقة", "كداب", "كدابين",
+    "ابن", "يلعن", "كسم", "عرص", "زبالة", "قرف", "وسخ",
+    "scam", "fraud", "thieves", "liars",
+  ];
+  return abuseWords.some(w => lower.includes(w));
 }
 
 // ===== AI Reply Generation =====
@@ -186,9 +197,9 @@ async function generateAIReply(
     .limit(1)
     .single();
 
-  // Check escalation FIRST
+  // Check escalation FIRST - return immediately, no AI reply after this
   if (isEscalationRequest(message)) {
-    const escalationReply = "تمام هحولك لحد من الفريق دلوقتي، حد هيتواصل معاك في اقرب وقت";
+    const escalationReply = "تمام هحولك لحد من الفريق يكلمك، حد هيرد عليك في أقرب وقت";
 
     await supabase.from("conversations")
       .update({ is_ai_active: false, status: "waiting" })
@@ -209,6 +220,24 @@ async function generateAIReply(
     notifyAdmin(supabase, contactName, contact.phone, message).catch(console.error);
 
     return { reply: escalationReply, mediaUrl: null };
+  }
+
+  // Check for abuse BEFORE generating AI reply
+  if (isAbusiveMessage(message)) {
+    const warningReply = "حضرتك لو سمحت نلتزم بأدب الحوار، إحنا هنا عشان نساعدك. لو فيه مشكلة حقيقية قولي وأنا هحاول أحلها معاك";
+    
+    await supabase.from("messages").insert({
+      conversation_id: conversation.id,
+      content: warningReply,
+      direction: "out",
+      sender_type: "ai",
+    });
+
+    await supabase.from("conversations")
+      .update({ last_message: warningReply, last_message_at: new Date().toISOString() })
+      .eq("id", conversation.id);
+
+    return { reply: warningReply, mediaUrl: null };
   }
 
   const [trainingRes, knowledgeRes, memoryRes, historyRes] = await Promise.all([
@@ -232,9 +261,8 @@ async function generateAIReply(
     const combined = `${t.question} ${t.answer}`.toLowerCase();
     const score = msgWords.filter(w => combined.includes(w)).length;
     return { ...t, score };
-  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
 
-  // FALLBACK: if no keyword matches, grab top 5 general FAQ
   if (scoredFaq.length === 0 && trainingData.length > 0) {
     scoredFaq = trainingData.slice(0, 5);
     console.log("No FAQ keyword match, using top 5 general FAQ as fallback");
@@ -248,9 +276,8 @@ async function generateAIReply(
       const combined = `${k.title} ${k.content}`.toLowerCase();
       const score = msgWords.filter(w => combined.includes(w)).length;
       return { ...k, score };
-    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
 
-  // FALLBACK: if no keyword matches, grab top 5 general knowledge
   if (scoredKnowledge.length === 0 && knowledgeData.length > 0) {
     scoredKnowledge = knowledgeData.filter((k: any) => k.data_type !== "image").slice(0, 5);
     console.log("No knowledge keyword match, using top 5 general entries as fallback");
@@ -266,20 +293,27 @@ async function generateAIReply(
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
-  // Detect if this is a short continuation message
+  // Detect conversation state
   const isShortMsg = (message || "").length < 15;
   const hasHistory = history.length > 2;
-  const continuationHint = (isShortMsg && hasHistory)
-    ? "\nالعميل بيكمل محادثة موجودة، متقوليش أهلاً تاني. كملي الكلام طبيعي."
-    : "";
+  const isFirstMessage = history.length <= 1;
 
-  // Handle media descriptions for non-multimodal models
+  // Build smart context hints
+  let contextHints = "";
+  if (isShortMsg && hasHistory) {
+    contextHints += "\nدي رسالة متابعة من العميل مش رسالة جديدة - كملي الكلام معاه طبيعي ومتقوليش أهلاً تاني ومتسأليش ازاي اساعدك.";
+  }
+  if (isFirstMessage) {
+    contextHints += `\nدي أول رسالة من العميل اسمه ${contactName} - رحبي بيه مرة واحدة بس.`;
+  }
+
+  // Handle media descriptions
   let mediaDescription = "";
   if (mediaType === "image" && !mediaUrl?.startsWith("data:")) {
-    mediaDescription = "\n(العميل بعتلك صورة - اسأليه عنها او وصفيها لو تقدري)";
+    mediaDescription = "\n(العميل بعتلك صورة - اسأليه عنها أو وصفيها لو تقدري)";
   }
   if (mediaType === "audio" && !mediaUrl?.startsWith("data:")) {
-    mediaDescription = "\n(العميل بعتلك رسالة صوتية - اسأليه يكتبلك اللي عايزه)";
+    mediaDescription = "\n(العميل بعت رسالة صوتية - حاولي تفهميها أو اسأليه يكتبلك)";
   }
 
   // Web search if needed
@@ -292,13 +326,31 @@ async function generateAIReply(
     }
   }
 
-  // SHORT system prompt
-  const systemPrompt = `انتي ${botName} من Sity Cloud. بنت مصرية لطيفة ومهنية.
-قواعد: ردي بالمصري العامي، جملة لـ 3 جمل مختصرة. ممنوع ايموجي. ممنوع تقولي انك AI. متكرريش اسم العميل. لو مش عارفة قولي "خليني اتاكد وارجعلك". لو فيه صورة مناسبة حطي [IMAGE:الرابط].${continuationHint}${mediaDescription}
-${memoryText ? `\nالعميل: ${memoryText}` : ""}${searchResults}
-${knowledgeText ? `\nبيانات:\n${knowledgeText.slice(0, 1200)}` : ""}
-${faqText ? `\n${faqText.slice(0, 600)}` : ""}
-${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
+  // ===== ENHANCED SYSTEM PROMPT =====
+  const systemPrompt = `انتي ${botName} من فريق Sity Cloud - بنت مصرية ذكية وطبيعية ومهنية.
+
+شخصيتك:
+- بتتكلمي زي البشر بالظبط بالمصري العامي
+- ردودك فيها روح وحيوية مش جامدة ولا آلية
+- لو العميل متضايق أو زعلان خففي عليه وهزري معاه شوية بذوق
+- لو العميل سأل سؤال تقني أو عن خدمة، ردي بمعلومات دقيقة ومفصلة من البيانات اللي عندك
+- لو مش لاقية معلومة محددة، حاولي تساعدي من اللي تعرفيه واعرضي تسأليله
+- متكرريش اسم العميل في كل رسالة - استخدميه مرة واحدة بس في أول تعارف
+- ممنوع ايموجي نهائيا
+- ممنوع تقولي انك ذكاء اصطناعي أو بوت
+- لو فيه صورة مناسبة من البيانات حطي [IMAGE:الرابط]
+
+قواعد الرد:
+- رد مختصر من جملة لـ 4 جمل حسب السؤال
+- لو السؤال بسيط رد قصير، لو السؤال مفصل رد مفصل
+- متقوليش "خليني اتاكد وارجعلك" - دايما حاولي تساعدي من المعلومات المتاحة
+- لو مفيش معلومة دقيقة قولي "مش متأكدة من التفاصيل دي بس خليني اسألك الفريق" بدل متجمدي
+- ممنوع ترسلي رسائل طويلة أو تشرحي شرح زيادة عن اللزوم
+${contextHints}${mediaDescription}
+${memoryText ? `\nمعلومات عن العميل: ${memoryText}` : ""}${searchResults}
+${knowledgeText ? `\nمعلومات عن خدماتنا:\n${knowledgeText.slice(0, 1500)}` : ""}
+${faqText ? `\nأسئلة شائعة:\n${faqText.slice(0, 800)}` : ""}
+${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`;
 
   // Build messages
   console.log(`System prompt length: ${systemPrompt.length}`);
@@ -311,7 +363,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
   for (const m of recentHistory) {
     const role = m.direction === "in" ? "user" : "assistant";
     let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
-    if (content.length > 150) content = content.slice(0, 150);
+    if (content.length > 200) content = content.slice(0, 200);
     const contentKey = content.slice(0, 50);
     if (seenContents.has(contentKey)) continue;
     seenContents.add(contentKey);
@@ -326,8 +378,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
   // Ensure last message is from user
   const lastMsg = chatMessages[chatMessages.length - 1];
   if (!lastMsg || lastMsg.role !== "user") {
-    const userContent = message || "مرحبا";
-    chatMessages.push({ role: "user", content: userContent });
+    chatMessages.push({ role: "user", content: message || "مرحبا" });
   }
 
   // Handle multimodal
@@ -358,7 +409,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
       return m;
     });
 
-    const freshSystemMsg = { role: "system", content: `انتي ${botName} من Sity Cloud. ردي بالمصري العامي، جملة مختصرة. ممنوع ايموجي.${continuationHint}${mediaDescription}` };
+    const freshSystemMsg = { role: "system", content: `انتي ${botName} من Sity Cloud. ردي بالمصري العامي بشكل طبيعي وذكي. ممنوع ايموجي. ممنوع تتكلمي كروبوت. ردي زي الإنسان بالظبط.${contextHints}${mediaDescription}` };
     const userMsg = lovableMessages[lovableMessages.length - 1];
 
     const attempts = [
@@ -380,7 +431,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
             model: attempt.model,
             messages: attempt.msgs,
             max_tokens: 300,
-            temperature: 0.7,
+            temperature: 0.8,
           }),
         });
 
@@ -410,10 +461,8 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
     const models = [
       "google/gemma-4-31b-it:free",
       "nvidia/nemotron-3-super-120b-a12b:free",
-      "openai/gpt-oss-120b:free",
       "meta-llama/llama-3.3-70b-instruct:free",
       "google/gemma-4-26b-a4b-it:free",
-      "minimax/minimax-m2.5:free",
       "qwen/qwen3-next-80b-a3b-instruct:free",
     ];
 
@@ -438,7 +487,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
             Authorization: `Bearer ${OPENROUTER_API_KEY}`,
             "HTTP-Referer": "https://sityai.lovable.app",
           },
-          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 300, temperature: 0.6 }),
+          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 300, temperature: 0.8 }),
         });
 
         if (!aiResponse.ok) { console.error(`${model}: ${aiResponse.status}`); continue; }
@@ -467,8 +516,8 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
     aiReply = aiReply.replace(/\[IMAGE:https?:\/\/[^\]]+\]/g, "").trim();
   }
 
-  // Check if AI escalated
-  if (aiReply.includes("اتاكد من الفريق") || aiReply.includes("احول") || aiReply.includes("[ESCALATE]")) {
+  // Check if AI self-escalated
+  if (aiReply.includes("[ESCALATE]")) {
     await supabase.from("conversations")
       .update({ is_ai_active: false, status: "waiting" })
       .eq("id", conversation.id);
@@ -498,30 +547,39 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
 
 // ===== Clean AI Reply =====
 function cleanAIReply(reply: string): string {
+  // Remove thinking tags
   reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
   const lines = reply.split("\n");
   const cleanLines = lines.filter(line => {
     const t = line.trim();
     if (!t) return false;
+    // Filter out internal reasoning/analysis lines
     if (/^(العميل |لازم |أولا|ثانيا|ملاحظة|السيناريو|التعليمات|بيانات التدريب|لقيت|أتحقق|أبدأ|أذكر|أكتفي|ده يتوافق|المطلوب|الخطوة|بناء على|حسب ال|من خلال ال|هنا |أولاً|ثانياً|Note:|Analysis:|Reasoning:|Step |First|Then|Based on)/i.test(t)) return false;
     if (/^\[(?!IMAGE|ESCALATE)[^\]]*\]/.test(t)) return false;
-    if (/^(The customer|I need|I should|Let me|I will|According|Based on|Looking at)/i.test(t)) return false;
+    if (/^(The customer|I need|I should|Let me|I will|According|Based on|Looking at|This is|My response|Response:)/i.test(t)) return false;
+    // Filter out category tags
+    if (/^\[(pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب|سيناريو)\]/i.test(t)) return false;
     return true;
   });
 
   reply = cleanLines.join("\n").trim();
+  // Remove inline category tags
   reply = reply.replace(/\[(?:pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب|سيناريو)\]\s*/gi, "").trim();
+  // Remove English reasoning lines
   reply = reply.replace(/\n\s*(Also|Note|However|But|So |This |I |We |The |Let|Now|Based|According|There|Here|First|Then)[^\n]*/gi, "").trim();
+  // Remove emojis
   reply = reply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
+  // Remove markdown bold
   reply = reply.replace(/\*+/g, "").trim();
 
-  if (reply.length > 350) {
+  // Trim overly long responses
+  if (reply.length > 400) {
     const sentences = reply.split(/[.،؟!]\s*/);
     let result = "";
     for (const s of sentences) {
       if (!s.trim()) continue;
-      if ((result + s).length > 300) break;
+      if ((result + s).length > 350) break;
       result += (result ? "، " : "") + s;
     }
     if (result.length > 20) reply = result;
@@ -546,7 +604,9 @@ async function notifyAdmin(supabase: any, customerName: string, customerPhone: s
     const serverUrl = botSettings?.baileys_server_url;
     if (!serverUrl) return;
 
-    const adminMsg = `تنبيه - طلب دعم بشري\nالعميل: ${customerName}\nالرقم: ${customerPhone}\nالرسالة: ${customerMessage}`;
+    // Format phone with + for admin readability
+    const formattedPhone = customerPhone.startsWith("+") ? customerPhone : `+${customerPhone}`;
+    const adminMsg = `تنبيه - طلب دعم بشري\n\nالعميل: ${customerName}\nالرقم: ${formattedPhone}\nالرسالة: ${customerMessage}`;
 
     await fetch(`${serverUrl}/send`, {
       method: "POST",
