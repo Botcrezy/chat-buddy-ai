@@ -66,17 +66,17 @@ Deno.serve(async (req) => {
     if (!conversation.is_ai_active) {
       const lastMsgTime = conversation.last_message_at ? new Date(conversation.last_message_at).getTime() : 0;
       const now = Date.now();
-      const hoursSinceLastMsg = (now - lastMsgTime) / (1000 * 60 * 60);
+      const minsSinceLastMsg = (now - lastMsgTime) / (1000 * 60);
       
-      if (hoursSinceLastMsg >= 1) {
-        console.log(`Auto-reactivating AI for conversation ${conversation.id} (${hoursSinceLastMsg.toFixed(1)}h since last msg)`);
+      if (minsSinceLastMsg >= 10) {
+        console.log(`Auto-reactivating AI for conversation ${conversation.id} (${minsSinceLastMsg.toFixed(0)}min since last msg)`);
         await supabase.from("conversations")
           .update({ is_ai_active: true, status: "open" })
           .eq("id", conversation.id);
         conversation.is_ai_active = true;
         conversation.status = "open";
       } else {
-        console.log(`AI inactive for conversation ${conversation.id}, skipping (${hoursSinceLastMsg.toFixed(1)}h since last msg, need 1h)`);
+        console.log(`AI inactive for conversation ${conversation.id}, skipping (${minsSinceLastMsg.toFixed(0)}min since last msg, need 10min)`);
       }
     }
 

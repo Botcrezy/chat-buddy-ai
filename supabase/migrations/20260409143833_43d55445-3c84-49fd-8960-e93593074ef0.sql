@@ -1,0 +1,1 @@
+UPDATE conversations SET is_ai_active = true, status = 'open' WHERE id = 'a04d3a02-f00c-4d16-9fcc-a2c895dbd664';
