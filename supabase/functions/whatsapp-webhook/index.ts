@@ -270,13 +270,11 @@ ${quickRepliesText || "لا يوجد"}
 
   const models = [
     "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
-    "meta-llama/llama-4-maverick:free",
-    "meta-llama/llama-4-scout:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
     "deepseek/deepseek-chat-v3-0324:free",
     "microsoft/phi-4-multimodal-instruct:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
   ];
 
   let aiReply: string | null = null;
