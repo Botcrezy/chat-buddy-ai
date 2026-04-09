@@ -200,12 +200,28 @@ async function generateAIReply(
   const memories = memoryRes.data || [];
   const history = historyRes.data || [];
 
-  // Build compact training context
-  const faqText = trainingData.map((t: any) => `س: ${t.question}\nج: ${t.answer}`).join("\n");
-  const knowledgeText = knowledgeData
+  // Build KEYWORD-MATCHED training context (not all data)
+  const msgLower = (message || "").toLowerCase();
+  const msgWords = msgLower.split(/\s+/).filter(w => w.length > 2);
+
+  // Score and pick top relevant FAQ entries
+  const scoredFaq = trainingData.map((t: any) => {
+    const combined = `${t.question} ${t.answer}`.toLowerCase();
+    const score = msgWords.filter(w => combined.includes(w)).length;
+    return { ...t, score };
+  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+  const faqText = scoredFaq.map((t: any) => `س: ${t.question}\nج: ${t.answer}`).join("\n");
+
+  // Score and pick top relevant knowledge entries
+  const scoredKnowledge = knowledgeData
     .filter((k: any) => k.data_type !== "image")
-    .map((k: any) => `${k.title}: ${k.content}`)
-    .join("\n");
+    .map((k: any) => {
+      const combined = `${k.title} ${k.content}`.toLowerCase();
+      const score = msgWords.filter(w => combined.includes(w)).length;
+      return { ...k, score };
+    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  const knowledgeText = scoredKnowledge.map((k: any) => `${k.title}: ${k.content}`).join("\n");
+
   const imageKnowledge = knowledgeData
     .filter((k: any) => k.data_type === "image" && k.media_url)
     .map((k: any) => `${k.title}: ${k.content} [صورة: ${k.media_url}]`)
@@ -215,34 +231,30 @@ async function generateAIReply(
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
+  // Detect if this is a short continuation message
+  const isShortMsg = (message || "").length < 15;
+  const hasHistory = history.length > 2;
+  const continuationHint = (isShortMsg && hasHistory)
+    ? "\nالعميل بيكمل محادثة موجودة، متقوليش أهلاً تاني. كملي الكلام طبيعي."
+    : "";
+
   // Web search if needed
   let searchResults = "";
-  if (needsWebSearch(message, knowledgeText)) {
+  const allKnowledge = knowledgeData.map((k: any) => `${k.title} ${k.content}`).join(" ");
+  if (needsWebSearch(message, allKnowledge)) {
     searchResults = await webSearch(message);
     if (searchResults) {
       searchResults = `\nنتائج بحث:\n${searchResults}`;
     }
   }
 
-  // SHORT, focused system prompt
+  // SHORT system prompt - max ~1500 chars
   const systemPrompt = `انتي ${botName} من Sity Cloud. بنت مصرية لطيفة ومهنية.
-
-قواعد:
-- ردي بالمصري العامي بس، جمله لـ 3 جمل مختصرة
-- ممنوع ايموجي نهائي
-- ممنوع تقولي انك AI او بوت
-- التزمي بالبيانات دي بس. لو مش عارفة قولي "خليني اتاكد وارجعلك"
-- متكرريش اسم العميل اكتر من مرة
-- لو فيه صورة مناسبة حطي [IMAGE:الرابط]
-
-${memoryText ? `العميل: ${memoryText}` : ""}
-${searchResults}
-
-بيانات:
-${knowledgeText.slice(0, 4000)}
-${faqText.slice(0, 1500)}
-
-صور: ${imageKnowledge.slice(0, 500) || "لا يوجد"}`;
+قواعد: ردي بالمصري العامي، جملة لـ 3 جمل مختصرة. ممنوع ايموجي. ممنوع تقولي انك AI. متكرريش اسم العميل. لو مش عارفة قولي "خليني اتاكد وارجعلك". لو فيه صورة مناسبة حطي [IMAGE:الرابط].${continuationHint}
+${memoryText ? `\nالعميل: ${memoryText}` : ""}${searchResults}
+${knowledgeText ? `\nبيانات:\n${knowledgeText.slice(0, 1200)}` : ""}
+${faqText ? `\n${faqText.slice(0, 600)}` : ""}
+${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
 
   // Build messages
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
