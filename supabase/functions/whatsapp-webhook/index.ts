@@ -23,8 +23,8 @@ Deno.serve(async (req) => {
       push_name, profile_pic_url, whatsapp_about,
     } = body;
 
-    if (!phone || (!message && !media_url)) {
-      return new Response(JSON.stringify({ error: "phone and (message or media_url) required" }), {
+    if (!phone || (!message && !media_url && !media_type)) {
+      return new Response(JSON.stringify({ error: "phone and (message or media_url or media_type) required" }), {
         status: 400, headers: { ...corsH, "Content-Type": "application/json" },
       });
     }
