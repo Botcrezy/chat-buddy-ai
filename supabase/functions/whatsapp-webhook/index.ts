@@ -183,7 +183,9 @@ async function generateAIReply(
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
-  const systemPrompt = `انتي ${botName}، موظفة خدمة عملاء حقيقية في شركة Sity Cloud. اونلاين 24/7.
+  const systemPrompt = `[IMPORTANT: Output ONLY the final message to send to the customer. No analysis, no thinking, no reasoning, no quotes from training data. Just the reply text.]
+
+انتي ${botName}، موظفة خدمة عملاء حقيقية في شركة Sity Cloud. اونلاين 24/7.
 
 شخصيتك:
 - بنت مصرية لطيفة ومهنية بتتكلم عامية مصرية طبيعية
@@ -218,7 +220,9 @@ ${imageKnowledge || "لا يوجد"}
 لو العميل سأل عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
 
 ردود جاهزة:
-${quickRepliesText || "لا يوجد"}`;
+${quickRepliesText || "لا يوجد"}
+
+مهم جدا: اكتبي الرد النهائي فقط اللي هيتبعت للعميل مباشرة. متكتبيش تحليل أو تفكير أو شرح. رد واحد مباشر بس.`;
 
   // Build chat messages with multimodal support
   const chatMessages: any[] = [
@@ -268,9 +272,11 @@ ${quickRepliesText || "لا يوجد"}`;
 
   const models = [
     "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "deepseek/deepseek-chat-v3-0324:free",
+    "microsoft/phi-4-multimodal-instruct:free",
     "google/gemma-4-26b-a4b-it:free",
     "qwen/qwen3-next-80b-a3b-instruct:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
   ];
 
   let aiReply: string | null = null;
@@ -289,7 +295,8 @@ ${quickRepliesText || "لا يوجد"}`;
         body: JSON.stringify({
           model,
           messages: chatMessages,
-          max_tokens: 400,
+          max_tokens: 300,
+          temperature: 0.7,
         }),
       });
 
@@ -313,11 +320,67 @@ ${quickRepliesText || "لا يوجد"}`;
 
   if (!aiReply) return { reply: null, mediaUrl: null };
 
-  // Strip any emoji
+  // ===== CLEANUP AI OUTPUT =====
+  // 1. Remove <think>...</think> tags
+  aiReply = aiReply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+  // 2. Remove reasoning patterns (Arabic or English) - look for the actual customer-facing reply
+  // Many models output analysis like "العميل سأل عن..." or "لازم أرد..." before the actual reply
+  // The actual reply usually starts with greeting words or direct answers
+  const replyStarters = /^(وعليكم|أهلا|مرحبا|تمام|أيوه|فاهمة|طبعا|شكرا|العفو|أنا مرام|أنا م|عندنا|ممكن|خليني|حلو|سعيدة|صباح|مساء|يا هلا|نورت|أهلاً|هلا|Hi |Hello|Welcome|هاي|أنا فاهم|أنا آسف|بياناتك|تقدر|الباقة|سؤال حلو|ده غالبا|جرب|حاليا|من خلال|بنرحب|كل دورة|أيوه!|ببساطة|ووردبريس|ويكس|شوبيفاي|GoDaddy)/;
+
+  if (aiReply.length > 200) {
+    const lines = aiReply.split("\n");
+    let replyStartIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (replyStarters.test(line)) {
+        replyStartIdx = i;
+        break;
+      }
+    }
+    if (replyStartIdx > 0) {
+      aiReply = lines.slice(replyStartIdx).join("\n").trim();
+    }
+  }
+
+  // 3. If still too long (reasoning mixed in), try to extract just sentences without analysis patterns
+  if (aiReply.length > 400) {
+    // Remove lines that look like reasoning
+    const cleanLines = aiReply.split("\n").filter(line => {
+      const t = line.trim();
+      if (!t) return false;
+      // Skip reasoning lines
+      if (/^(العميل |لازم |أولا|ثانيا|ملاحظة|السيناريو|التعليمات|بيانات التدريب|لقيت|أتحقق|أبدأ|أذكر|أكتفي|ده يتوافق|لكن|ربما|كمان|حسب|بناء|المطلوب|الخطوة)/i.test(t)) return false;
+      if (/^\[.*\]$/.test(t) && !t.startsWith("[ESCALATE]") && !t.startsWith("[IMAGE:")) return false;
+      return true;
+    });
+    if (cleanLines.length > 0) {
+      aiReply = cleanLines.join("\n").trim();
+    }
+  }
+
+  // 4. Truncate if still too long
+  if (aiReply.length > 500) {
+    const sentences = aiReply.split(/[.؟?!]\s*/);
+    let result = "";
+    for (const s of sentences) {
+      if ((result + s).length > 400) break;
+      result += (result ? ". " : "") + s;
+    }
+    if (result.length > 20) aiReply = result;
+  }
+
+  // 5. Remove English text that appears after Arabic reply (reasoning leakage)
+  aiReply = aiReply.replace(/\n\s*(Also|Note|However|But|So |This |I |We |The |Let|Now|Based|According|There|Here|First|Then)[^\n]*/gi, "").trim();
+  // Remove training data category tags like [pricing], [scenarios], etc.
+  aiReply = aiReply.replace(/\[(?:pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب)\]\s*/gi, "").trim();
+  // Remove lines starting with [ that are training data references
+  aiReply = aiReply.replace(/\n\s*\[(?!ESCALATE|IMAGE)[^\]]*\][^\n]*/g, "").trim();
+
+  // 6. Strip emoji
   aiReply = aiReply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
 
-  // Remove thinking tags if present (some models add <think>...</think>)
-  aiReply = aiReply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
   // Check for escalation
   let needsEscalation = false;
@@ -401,7 +464,7 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
 
 رسالة العميل: ${userMsg}`;
 
-    const memModels = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "qwen/qwen3-next-80b-a3b-instruct:free"];
+    const memModels = ["google/gemma-4-31b-it:free", "meta-llama/llama-4-scout:free", "qwen/qwen3-next-80b-a3b-instruct:free", "deepseek/deepseek-chat-v3-0324:free"];
     let content: string | null = null;
 
     for (const model of memModels) {
