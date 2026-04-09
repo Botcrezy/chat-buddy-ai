@@ -35,6 +35,35 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Get Baileys server URL
+    const { data: botSettings } = await supabase
+      .from("bot_settings")
+      .select("baileys_server_url")
+      .limit(1)
+      .single();
+
+    const serverUrl = botSettings?.baileys_server_url;
+    const phone = conversation.contacts?.phone;
+
+    // Send via WhatsApp
+    let whatsappSent = false;
+    if (serverUrl && phone) {
+      try {
+        const res = await fetch(`${serverUrl}/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, message: content }),
+        });
+        if (res.ok) {
+          whatsappSent = true;
+        } else {
+          console.error("Baileys send failed:", await res.text());
+        }
+      } catch (e) {
+        console.error("Baileys send error:", e);
+      }
+    }
+
     // Save the message
     await supabase.from("messages").insert({
       conversation_id,
@@ -49,16 +78,8 @@ Deno.serve(async (req) => {
       .update({ last_message: content, last_message_at: new Date().toISOString() })
       .eq("id", conversation_id);
 
-    // Get Baileys server URL from settings to forward message
-    // The VPS server will handle the actual WhatsApp sending
-    // For now, we store the message and the VPS polls or receives webhook
-
     return new Response(
-      JSON.stringify({
-        success: true,
-        phone: conversation.contacts?.phone,
-        message: content,
-      }),
+      JSON.stringify({ success: true, whatsapp_sent: whatsappSent, phone }),
       { headers: { ...corsH, "Content-Type": "application/json" } }
     );
   } catch (error) {
