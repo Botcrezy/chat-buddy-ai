@@ -247,8 +247,14 @@ async function startSocket() {
         if (msg.key.fromMe) continue;
         if (!msg.message) continue;
 
-        const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
-        if (!phone || phone.includes('@g.us')) continue;
+        const remoteJid = msg.key.remoteJid || '';
+        // Skip group messages
+        if (remoteJid.includes('@g.us')) continue;
+        // Extract clean phone number from any JID format (@s.whatsapp.net, @lid, etc.)
+        const phone = remoteJid.split('@')[0] || '';
+        if (!phone) continue;
+
+        addLog('info', `📞 JID: ${remoteJid}, Phone: ${phone}`);
 
         const pushName = msg.pushName || '';
 
