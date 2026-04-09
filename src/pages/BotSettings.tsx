@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Bot, Brain, Zap, MessageSquare, Plus, Trash2, TestTube,
   Send, BookOpen, Save, Loader2, RefreshCw, Clock, UserCog,
-  Database, Image, FileText, HelpCircle, Sparkles, Upload,
+  Database, Image, FileText, HelpCircle, Sparkles, Upload, Pencil, X,
 } from "lucide-react";
 
 export default function BotSettings() {
@@ -39,6 +39,7 @@ export default function BotSettings() {
   const [showAddReply, setShowAddReply] = useState(false);
   const [showAddRule, setShowAddRule] = useState(false);
   const [showAddKB, setShowAddKB] = useState(false);
+  const [editingKB, setEditingKB] = useState<any>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -147,6 +148,21 @@ export default function BotSettings() {
   const toggleKnowledgeItem = async (id: string, active: boolean) => {
     await supabase.from("knowledge_base" as any).update({ is_active: !active } as any).eq("id", id);
     fetchAll();
+  };
+
+  const updateKnowledgeItem = async () => {
+    if (!editingKB || !editingKB.title || !editingKB.content) return;
+    await supabase.from("knowledge_base" as any).update({
+      title: editingKB.title,
+      content: editingKB.content,
+      category: editingKB.category,
+      data_type: editingKB.data_type,
+      media_url: editingKB.media_url,
+      media_type: editingKB.media_type,
+    } as any).eq("id", editingKB.id);
+    setEditingKB(null);
+    fetchAll();
+    toast({ title: "تم تحديث العنصر" });
   };
 
   const testBot = async () => {
@@ -373,6 +389,9 @@ export default function BotSettings() {
                             </div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditingKB({ ...item })}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
                             <Switch checked={item.is_active} onCheckedChange={() => toggleKnowledgeItem(item.id, item.is_active)} />
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => deleteKnowledgeItem(item.id)}>
                               <Trash2 className="h-3.5 w-3.5" />
@@ -386,9 +405,38 @@ export default function BotSettings() {
               )}
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* Training Data */}
+          {/* Edit Knowledge Item Dialog */}
+          <Dialog open={!!editingKB} onOpenChange={(open) => !open && setEditingKB(null)}>
+            <DialogContent dir="rtl" className="max-w-lg">
+              <DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-primary" /> تعديل عنصر</DialogTitle></DialogHeader>
+              {editingKB && (
+                <div className="space-y-4 mt-2">
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">العنوان</Label>
+                    <Input value={editingKB.title} onChange={(e) => setEditingKB({ ...editingKB, title: e.target.value })} className="bg-muted/30" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">المحتوى</Label>
+                    <Textarea rows={4} value={editingKB.content} onChange={(e) => setEditingKB({ ...editingKB, content: e.target.value })} className="bg-muted/30 resize-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="font-semibold">التصنيف</Label>
+                    <Input value={editingKB.category} onChange={(e) => setEditingKB({ ...editingKB, category: e.target.value })} className="bg-muted/30" />
+                  </div>
+                  {editingKB.media_url && (
+                    <div className="rounded-xl overflow-hidden border bg-muted/20">
+                      <img src={editingKB.media_url} className="w-full h-32 object-cover" />
+                    </div>
+                  )}
+                  <Button onClick={updateKnowledgeItem} className="w-full rounded-xl gap-2">
+                    <Save className="h-4 w-4" /> حفظ التعديلات
+                  </Button>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
         <TabsContent value="training" className="space-y-4 mt-4">
           <Card className="border-0 shadow-md">
             <CardHeader>

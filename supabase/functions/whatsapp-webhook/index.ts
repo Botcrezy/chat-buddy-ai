@@ -5,6 +5,8 @@ const corsH = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const ADMIN_PHONE = "201152956791";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsH });
 
@@ -27,7 +29,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Upsert contact
     const contactData: any = {
       phone,
       name: name || push_name || phone,
@@ -43,7 +44,6 @@ Deno.serve(async (req) => {
       .select()
       .single();
 
-    // Get or create conversation
     let { data: conversation } = await supabase
       .from("conversations")
       .select("*")
@@ -62,8 +62,7 @@ Deno.serve(async (req) => {
       conversation = newConv;
     }
 
-    // Save incoming message
-    const msgContent = message || (media_type === "image" ? "📷 صورة" : "📎 ملف");
+    const msgContent = message || (media_type === "image" ? "صورة" : "ملف");
     await supabase.from("messages").insert({
       conversation_id: conversation.id,
       content: msgContent,
@@ -74,7 +73,6 @@ Deno.serve(async (req) => {
       media_type: media_type || null,
     });
 
-    // Update conversation
     await supabase
       .from("conversations")
       .update({
@@ -85,7 +83,6 @@ Deno.serve(async (req) => {
       })
       .eq("id", conversation.id);
 
-    // If AI is active, generate reply
     let aiReply = null;
     let aiMediaUrl = null;
     if (conversation.is_ai_active) {
@@ -114,9 +111,6 @@ async function generateAIReply(supabase: any, conversation: any, contact: any, m
     .limit(1)
     .single();
 
-  // Bot is always online 24/7 - no working hours check
-
-  // Fetch all context in parallel
   const [trainingRes, knowledgeRes, quickRes, memoryRes, historyRes] = await Promise.all([
     supabase.from("training_data").select("question, answer, category").eq("is_active", true),
     supabase.from("knowledge_base").select("title, content, category, data_type, media_url, media_type").eq("is_active", true),
@@ -131,7 +125,6 @@ async function generateAIReply(supabase: any, conversation: any, contact: any, m
   const memories = memoryRes.data || [];
   const history = historyRes.data || [];
 
-  // Build knowledge sections
   const faqText = trainingData
     .map((t: any) => `[${t.category}] سؤال: ${t.question}\nجواب: ${t.answer}`)
     .join("\n\n");
@@ -162,45 +155,34 @@ async function generateAIReply(supabase: any, conversation: any, contact: any, m
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
-  const systemPrompt = `أنتِ ${botName}، عضوة في فريق خدمة العملاء في شركة Sity Cloud. أنتِ أونلاين 24 ساعة يومياً 7 أيام في الأسبوع.
+  const systemPrompt = `انتي ${botName}، من فريق خدمة العملاء في شركة Sity Cloud. اونلاين 24/7.
 
-🎭 شخصيتك:
-- اسمك ${botName} (مؤنث)
-- بتتكلمي باللهجة المصرية العامية بشكل طبيعي
-- شخصيتك: ذكية، محترفة، لطيفة، بتفهم بسرعة
-- بتحطي إيموجي بشكل خفيف 😊
+قواعد صارمة:
+1. ممنوع تماما استخدام اي ايموجي او رموز تعبيرية في الردود - لا ايموجي نهائيا
+2. لا تقولي انك ذكاء اصطناعي او بوت - لو حد سالك قولي "انا ${botName} من فريق Sity Cloud"
+3. لا تتكلمي عن اي حاجة مش موجودة في بيانات التدريب - لو مش عارفة قولي "خليني اتاكد من الفريق وارجعلك حالا"
+4. لا تخترعي معلومات او اسعار مش مذكورة في البيانات
+5. ردي بشكل مختصر ومهني - جملتين لـ 4 جمل كحد اقصى
+6. اتكلمي بالمصري العامي بشكل طبيعي ومهني ولطيف
+7. لو العميل طلب حد بشري او دعم فني او عنده مشكلة كبيرة، ابدئي ردك بـ [ESCALATE] وبعدين الرد الطبيعي
 
-⛔ قواعد صارمة لا تُكسر أبداً:
-1. لا تقولي أبداً إنك ذكاء اصطناعي أو بوت أو AI - لو حد سألك قولي "أنا ${botName} من فريق Sity Cloud 😊"
-2. لا تتكلمي عن أي حاجة مش موجودة في بيانات التدريب أدناه - لو مش عارفة حاجة قولي "خليني أتأكد من الفريق وأرجعلك حالاً 😊"
-3. لا تخترعي معلومات أو أسعار أو خدمات مش مذكورة في البيانات
-4. ردّي بشكل مختصر ومهني - جملتين لـ 4 جمل كحد أقصى
-5. ادّي تفاصيل دقيقة من البيانات التدريبية بس
-6. متكتبيش كلام كتير - خلي الرد قصير ومفيد وبروفيشنال
+${botSettings?.personality ? `\nتعليمات الادارة:\n${botSettings.personality}` : ""}
 
-${botSettings?.personality ? `\n📝 تعليمات الإدارة:\n${botSettings.personality}` : ""}
-
-👤 العميل "${contactName}":
+العميل "${contactName}":
 ${memoryText || "عميل جديد"}
 ${contact.summary ? `ملخص: ${contact.summary}` : ""}
 
-📚 بيانات التدريب (المصدر الوحيد للمعلومات):
+بيانات التدريب (المصدر الوحيد للمعلومات):
 ${knowledgeText || ""}
 ${faqText || ""}
 ${faqKnowledge || ""}
 
-🖼️ صور متاحة:
+صور متاحة:
 ${imageKnowledge || "لا يوجد"}
-⚠️ لو العميل سأل عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
+لو العميل سال عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
 
-💬 ردود جاهزة:
-${quickRepliesText || "لا يوجد"}
-
-📋 أسلوب الرد:
-- مصري عامي، مختصر، مهني، لطيف
-- استخدمي اسم العميل لو عارفاه
-- لو بعت صورة بس: اسأليه إيه المطلوب
-- ركّزي على اللي العميل محتاجه بالظبط`;
+ردود جاهزة:
+${quickRepliesText || "لا يوجد"}`;
 
   const chatMessages = [
     { role: "system", content: systemPrompt },
@@ -210,21 +192,23 @@ ${quickRepliesText || "لا يوجد"}
     })),
   ];
 
-  // Call Lovable AI Gateway
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-  if (!LOVABLE_API_KEY) {
-    console.error("LOVABLE_API_KEY not configured");
+  // Use OpenRouter with google/gemma-4-31b-it:free
+  const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+  if (!OPENROUTER_API_KEY) {
+    console.error("OPENROUTER_API_KEY not configured");
     return { reply: null, mediaUrl: null };
   }
 
-  const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      "HTTP-Referer": "https://sityai.lovable.app",
+      "X-Title": "Sity Cloud Bot",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: "google/gemma-4-31b-it:free",
       messages: chatMessages,
       max_tokens: 400,
     }),
@@ -232,7 +216,7 @@ ${quickRepliesText || "لا يوجد"}
 
   if (!aiResponse.ok) {
     const errText = await aiResponse.text();
-    console.error("AI Gateway error:", aiResponse.status, errText);
+    console.error("OpenRouter error:", aiResponse.status, errText);
     return { reply: null, mediaUrl: null };
   }
 
@@ -241,7 +225,17 @@ ${quickRepliesText || "لا يوجد"}
 
   if (!aiReply) return { reply: null, mediaUrl: null };
 
-  // Extract image URL if present in reply
+  // Strip any emoji that might slip through
+  aiReply = aiReply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
+
+  // Check for escalation
+  let needsEscalation = false;
+  if (aiReply.startsWith("[ESCALATE]")) {
+    needsEscalation = true;
+    aiReply = aiReply.replace("[ESCALATE]", "").trim();
+  }
+
+  // Extract image URL if present
   let aiMediaUrl = null;
   const imageMatch = aiReply.match(/\[IMAGE:(https?:\/\/[^\]]+)\]/);
   if (imageMatch) {
@@ -249,12 +243,15 @@ ${quickRepliesText || "لا يوجد"}
     aiReply = aiReply.replace(/\[IMAGE:https?:\/\/[^\]]+\]/g, "").trim();
   }
 
-  // Check if AI couldn't answer → transfer to agent
-  if (aiReply.includes("أتأكد من الزملاء") || aiReply.includes("أحول لموظف") || aiReply.includes("سأحول سؤالك")) {
+  // Check if AI couldn't answer
+  if (aiReply.includes("اتاكد من الزملاء") || aiReply.includes("احول لموظف") || aiReply.includes("ساحول سؤالك") || needsEscalation) {
     await supabase
       .from("conversations")
       .update({ is_ai_active: false, status: "waiting" })
       .eq("id", conversation.id);
+
+    // Send admin notification via Baileys
+    notifyAdmin(supabase, contactName, contact.phone, message).catch(console.error);
   }
 
   // Save AI reply
@@ -272,31 +269,61 @@ ${quickRepliesText || "لا يوجد"}
     .update({ last_message: aiReply, last_message_at: new Date().toISOString() })
     .eq("id", conversation.id);
 
-  // Extract memory (async)
   extractMemory(supabase, contact.id, message, aiReply).catch(console.error);
 
   return { reply: aiReply, mediaUrl: aiMediaUrl };
 }
 
+async function notifyAdmin(supabase: any, customerName: string, customerPhone: string, customerMessage: string) {
+  try {
+    const { data: botSettings } = await supabase
+      .from("bot_settings")
+      .select("baileys_server_url")
+      .limit(1)
+      .single();
+
+    const serverUrl = botSettings?.baileys_server_url;
+    if (!serverUrl) {
+      console.error("No baileys server URL for admin notification");
+      return;
+    }
+
+    const adminMsg = `تنبيه - طلب دعم بشري\n\nالعميل: ${customerName}\nالرقم: ${customerPhone}\nالرسالة: ${customerMessage}\n\nيرجى التواصل مع العميل في اقرب وقت.`;
+
+    await fetch(`${serverUrl}/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: ADMIN_PHONE,
+        message: adminMsg,
+      }),
+    });
+    console.log("Admin notification sent to", ADMIN_PHONE);
+  } catch (e) {
+    console.error("Failed to notify admin:", e);
+  }
+}
+
 async function extractMemory(supabase: any, contactId: string, userMsg: string, aiReply: string) {
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) return;
+    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+    if (!OPENROUTER_API_KEY) return;
 
-    const extractPrompt = `حلل الرسالة التالية واستخرج أي معلومات مهمة عن العميل.
-أرجع JSON array فقط (بدون أي نص إضافي). كل عنصر يحتوي: {"memory_type": "preference|complaint|interest|order|note", "key": "وصف قصير", "value": "القيمة"}
-إذا لم توجد معلومات مهمة، أرجع: []
+    const extractPrompt = `حلل الرسالة التالية واستخرج اي معلومات مهمة عن العميل.
+ارجع JSON array فقط (بدون اي نص اضافي). كل عنصر يحتوي: {"memory_type": "preference|complaint|interest|order|note", "key": "وصف قصير", "value": "القيمة"}
+اذا لم توجد معلومات مهمة، ارجع: []
 
 رسالة العميل: ${userMsg}`;
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://sityai.lovable.app",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
+        model: "google/gemma-4-31b-it:free",
         messages: [{ role: "user", content: extractPrompt }],
         max_tokens: 300,
       }),
@@ -308,8 +335,8 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
 
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      const memories = JSON.parse(jsonMatch[0]);
-      for (const mem of memories) {
+      const memoryItems = JSON.parse(jsonMatch[0]);
+      for (const mem of memoryItems) {
         if (mem.key && mem.value) {
           await supabase.from("customer_memory").insert({
             contact_id: contactId,

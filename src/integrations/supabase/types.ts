@@ -450,6 +450,7 @@ export type Database = {
           content: string
           created_at: string
           data_type: string
+          embedding: string | null
           id: string
           is_active: boolean
           media_type: string | null
@@ -462,6 +463,7 @@ export type Database = {
           content: string
           created_at?: string
           data_type?: string
+          embedding?: string | null
           id?: string
           is_active?: boolean
           media_type?: string | null
@@ -474,6 +476,7 @@ export type Database = {
           content?: string
           created_at?: string
           data_type?: string
+          embedding?: string | null
           id?: string
           is_active?: boolean
           media_type?: string | null
@@ -847,6 +850,19 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_knowledge: {
+        Args: {
+          match_count: number
+          match_threshold: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          title: string
+        }[]
       }
     }
     Enums: {
