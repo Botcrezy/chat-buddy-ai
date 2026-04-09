@@ -239,10 +239,10 @@ ${memoryText ? `العميل: ${memoryText}` : ""}
 ${searchResults}
 
 بيانات:
-${knowledgeText.slice(0, 6000)}
-${faqText.slice(0, 2000)}
+${knowledgeText.slice(0, 4000)}
+${faqText.slice(0, 1500)}
 
-صور: ${imageKnowledge.slice(0, 1000) || "لا يوجد"}`;
+صور: ${imageKnowledge.slice(0, 500) || "لا يوجد"}`;
 
   // Build messages
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
