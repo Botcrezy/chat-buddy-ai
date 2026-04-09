@@ -150,6 +150,21 @@ export default function BotSettings() {
     fetchAll();
   };
 
+  const updateKnowledgeItem = async () => {
+    if (!editingKB || !editingKB.title || !editingKB.content) return;
+    await supabase.from("knowledge_base" as any).update({
+      title: editingKB.title,
+      content: editingKB.content,
+      category: editingKB.category,
+      data_type: editingKB.data_type,
+      media_url: editingKB.media_url,
+      media_type: editingKB.media_type,
+    } as any).eq("id", editingKB.id);
+    setEditingKB(null);
+    fetchAll();
+    toast({ title: "تم تحديث العنصر" });
+  };
+
   const testBot = async () => {
     if (!testMessage.trim()) return;
     setTesting(true);
