@@ -311,14 +311,13 @@ ${faqText.slice(0, 2000)}
 
       if (aiResponse.ok) {
         const aiData = await aiResponse.json();
+        console.log("Lovable AI response:", JSON.stringify(aiData).slice(0, 300));
         aiReply = aiData.choices?.[0]?.message?.content;
         if (aiReply) console.log("Success with Lovable AI Gateway");
+        else console.error("Lovable AI: empty content in response");
       } else {
-        const status = aiResponse.status;
-        console.error(`Lovable AI error: ${status}`);
-        if (status === 429 || status === 402) {
-          console.log("Lovable AI rate limited, falling back to OpenRouter");
-        }
+        const errBody = await aiResponse.text();
+        console.error(`Lovable AI error ${aiResponse.status}: ${errBody.slice(0, 300)}`);
       }
     } catch (e) {
       console.error("Lovable AI exception:", e);
