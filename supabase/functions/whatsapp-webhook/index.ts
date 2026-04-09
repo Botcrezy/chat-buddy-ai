@@ -200,12 +200,28 @@ async function generateAIReply(
   const memories = memoryRes.data || [];
   const history = historyRes.data || [];
 
-  // Build compact training context
-  const faqText = trainingData.map((t: any) => `س: ${t.question}\nج: ${t.answer}`).join("\n");
-  const knowledgeText = knowledgeData
+  // Build KEYWORD-MATCHED training context (not all data)
+  const msgLower = (message || "").toLowerCase();
+  const msgWords = msgLower.split(/\s+/).filter(w => w.length > 2);
+
+  // Score and pick top relevant FAQ entries
+  const scoredFaq = trainingData.map((t: any) => {
+    const combined = `${t.question} ${t.answer}`.toLowerCase();
+    const score = msgWords.filter(w => combined.includes(w)).length;
+    return { ...t, score };
+  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+  const faqText = scoredFaq.map((t: any) => `س: ${t.question}\nج: ${t.answer}`).join("\n");
+
+  // Score and pick top relevant knowledge entries
+  const scoredKnowledge = knowledgeData
     .filter((k: any) => k.data_type !== "image")
-    .map((k: any) => `${k.title}: ${k.content}`)
-    .join("\n");
+    .map((k: any) => {
+      const combined = `${k.title} ${k.content}`.toLowerCase();
+      const score = msgWords.filter(w => combined.includes(w)).length;
+      return { ...k, score };
+    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  const knowledgeText = scoredKnowledge.map((k: any) => `${k.title}: ${k.content}`).join("\n");
+
   const imageKnowledge = knowledgeData
     .filter((k: any) => k.data_type === "image" && k.media_url)
     .map((k: any) => `${k.title}: ${k.content} [صورة: ${k.media_url}]`)
@@ -215,46 +231,47 @@ async function generateAIReply(
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
+  // Detect if this is a short continuation message
+  const isShortMsg = (message || "").length < 15;
+  const hasHistory = history.length > 2;
+  const continuationHint = (isShortMsg && hasHistory)
+    ? "\nالعميل بيكمل محادثة موجودة، متقوليش أهلاً تاني. كملي الكلام طبيعي."
+    : "";
+
   // Web search if needed
   let searchResults = "";
-  if (needsWebSearch(message, knowledgeText)) {
+  const allKnowledge = knowledgeData.map((k: any) => `${k.title} ${k.content}`).join(" ");
+  if (needsWebSearch(message, allKnowledge)) {
     searchResults = await webSearch(message);
     if (searchResults) {
       searchResults = `\nنتائج بحث:\n${searchResults}`;
     }
   }
 
-  // SHORT, focused system prompt
+  // SHORT system prompt - max ~1500 chars
   const systemPrompt = `انتي ${botName} من Sity Cloud. بنت مصرية لطيفة ومهنية.
-
-قواعد:
-- ردي بالمصري العامي بس، جمله لـ 3 جمل مختصرة
-- ممنوع ايموجي نهائي
-- ممنوع تقولي انك AI او بوت
-- التزمي بالبيانات دي بس. لو مش عارفة قولي "خليني اتاكد وارجعلك"
-- متكرريش اسم العميل اكتر من مرة
-- لو فيه صورة مناسبة حطي [IMAGE:الرابط]
-
-${memoryText ? `العميل: ${memoryText}` : ""}
-${searchResults}
-
-بيانات:
-${knowledgeText.slice(0, 4000)}
-${faqText.slice(0, 1500)}
-
-صور: ${imageKnowledge.slice(0, 500) || "لا يوجد"}`;
+قواعد: ردي بالمصري العامي، جملة لـ 3 جمل مختصرة. ممنوع ايموجي. ممنوع تقولي انك AI. متكرريش اسم العميل. لو مش عارفة قولي "خليني اتاكد وارجعلك". لو فيه صورة مناسبة حطي [IMAGE:الرابط].${continuationHint}
+${memoryText ? `\nالعميل: ${memoryText}` : ""}${searchResults}
+${knowledgeText ? `\nبيانات:\n${knowledgeText.slice(0, 1200)}` : ""}
+${faqText ? `\n${faqText.slice(0, 600)}` : ""}
+${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
 
   // Build messages
+  console.log(`System prompt length: ${systemPrompt.length}`);
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 8 messages, truncate long ones, deduplicate consecutive same-role
-  const recentHistory = history.slice(-8);
+  // Add last 6 messages, deduplicate content and consecutive same-role
+  const recentHistory = history.slice(-6);
+  const seenContents = new Set<string>();
   let lastRole = "system";
   for (const m of recentHistory) {
     const role = m.direction === "in" ? "user" : "assistant";
     let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
-    if (content.length > 200) content = content.slice(0, 200);
-    // Skip if same role as last (merge into previous)
+    if (content.length > 150) content = content.slice(0, 150);
+    // Skip duplicate messages (e.g. repeated welcomes)
+    const contentKey = content.slice(0, 50);
+    if (seenContents.has(contentKey)) continue;
+    seenContents.add(contentKey);
     if (role === lastRole && chatMessages.length > 1) {
       chatMessages[chatMessages.length - 1].content += "\n" + content;
     } else {
@@ -263,35 +280,34 @@ ${faqText.slice(0, 1500)}
     lastRole = role;
   }
 
-  // Handle current message - multimodal
-  if (mediaType === "image" && mediaUrl && mediaUrl.startsWith("data:")) {
-    chatMessages.push({
-      role: "user",
-      content: [
-        ...(message ? [{ type: "text", text: message }] : [{ type: "text", text: "العميل بعتلك الصورة دي، حللها وردي عليه" }]),
-        { type: "image_url", image_url: { url: mediaUrl } },
-      ],
-    });
-  } else if (mediaType === "audio" && mediaUrl && mediaUrl.startsWith("data:")) {
-    // Send audio as input_audio for models that support it
-    const base64Data = mediaUrl.split(",")[1] || mediaUrl;
-    chatMessages.push({
-      role: "user",
-      content: [
-        { type: "text", text: message || "العميل بعتلك رسالة صوتية، افهمها وردي عليه" },
-        { type: "input_audio", input_audio: { data: base64Data, format: "ogg" } },
-      ],
-    });
+  // Ensure last message is from user (add current message if not in history yet)
+  const lastMsg = chatMessages[chatMessages.length - 1];
+  if (!lastMsg || lastMsg.role !== "user") {
+    const userContent = message || "مرحبا";
+    chatMessages.push({ role: "user", content: userContent });
   }
+
+  // Handle multimodal for OpenRouter only (added later)
+  const multimodalMessage = (mediaType === "image" && mediaUrl && mediaUrl.startsWith("data:"))
+    ? { role: "user", content: [
+        ...(message ? [{ type: "text", text: message }] : [{ type: "text", text: "العميل بعتلك الصورة دي" }]),
+        { type: "image_url", image_url: { url: mediaUrl } },
+      ]}
+    : (mediaType === "audio" && mediaUrl && mediaUrl.startsWith("data:"))
+    ? { role: "user", content: [
+        { type: "text", text: message || "العميل بعتلك رسالة صوتية" },
+        { type: "input_audio", input_audio: { data: mediaUrl.split(",")[1] || mediaUrl, format: "ogg" } },
+      ]}
+    : null;
 
   // Try Lovable AI Gateway first (reliable), then OpenRouter free models as fallback
   let aiReply: string | null = null;
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
-  // --- PRIMARY: Lovable AI Gateway with retry ---
+  // --- PRIMARY: Lovable AI Gateway ---
   if (LOVABLE_API_KEY) {
-    // Strip multimodal content for Lovable AI
+    // Text-only messages for Lovable AI
     const lovableMessages = chatMessages.map((m: any) => {
       if (Array.isArray(m.content)) {
         const textParts = m.content.filter((p: any) => p.type === "text");
@@ -300,11 +316,14 @@ ${faqText.slice(0, 1500)}
       return m;
     });
 
-    // Try with full context first, then minimal context if null
+    // Build attempts: full → last 3 msgs → just user msg with fresh system
+    const freshSystemMsg = { role: "system", content: `انتي ${botName} من Sity Cloud. ردي بالمصري العامي، جملة مختصرة. ممنوع ايموجي.${continuationHint}` };
+    const userMsg = lovableMessages[lovableMessages.length - 1];
+
     const attempts = [
       { msgs: lovableMessages, model: "google/gemini-2.5-flash" },
-      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash" },
-      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash-lite" },
+      { msgs: [lovableMessages[0], ...lovableMessages.slice(-3)], model: "google/gemini-2.5-flash" },
+      { msgs: [freshSystemMsg, userMsg], model: "google/gemini-2.5-flash-lite" },
     ];
 
     for (const attempt of attempts) {
@@ -319,7 +338,7 @@ ${faqText.slice(0, 1500)}
           body: JSON.stringify({
             model: attempt.model,
             messages: attempt.msgs,
-            max_tokens: 200,
+            max_tokens: 150,
             temperature: 0.7,
           }),
         });
@@ -327,15 +346,15 @@ ${faqText.slice(0, 1500)}
         if (aiResponse.ok) {
           const aiData = await aiResponse.json();
           const rawContent = aiData.choices?.[0]?.message?.content;
-          if (rawContent) {
+          if (rawContent && rawContent.trim().length > 2) {
             aiReply = rawContent;
             console.log("Success with Lovable AI");
             break;
           }
-          console.log("Lovable AI returned empty, retrying with less context");
+          console.log("Lovable AI returned empty, retrying");
         } else {
           console.error(`Lovable AI error: ${aiResponse.status}`);
-          break; // Don't retry on auth/rate limit errors
+          break;
         }
       } catch (e) {
         console.error("Lovable AI exception:", e);
