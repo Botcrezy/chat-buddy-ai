@@ -371,6 +371,8 @@ ${quickRepliesText || "لا يوجد"}
 
   // 5. Remove English text that appears after Arabic reply (reasoning leakage)
   aiReply = aiReply.replace(/\n\s*(Also|Note|However|But|So |This |I |We |The |Let|Now|Based|According|There|Here|First|Then)[^\n]*/gi, "").trim();
+  // Remove training data category tags like [pricing], [scenarios], etc.
+  aiReply = aiReply.replace(/\[(?:pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب)\]\s*/gi, "").trim();
   // Remove lines starting with [ that are training data references
   aiReply = aiReply.replace(/\n\s*\[(?!ESCALATE|IMAGE)[^\]]*\][^\n]*/g, "").trim();
 
