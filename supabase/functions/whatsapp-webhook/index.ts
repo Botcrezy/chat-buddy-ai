@@ -257,16 +257,21 @@ ${faqText ? `\n${faqText.slice(0, 600)}` : ""}
 ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
 
   // Build messages
+  console.log(`System prompt length: ${systemPrompt.length}`);
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 8 messages, truncate long ones, deduplicate consecutive same-role
-  const recentHistory = history.slice(-8);
+  // Add last 6 messages, deduplicate content and consecutive same-role
+  const recentHistory = history.slice(-6);
+  const seenContents = new Set<string>();
   let lastRole = "system";
   for (const m of recentHistory) {
     const role = m.direction === "in" ? "user" : "assistant";
     let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
-    if (content.length > 200) content = content.slice(0, 200);
-    // Skip if same role as last (merge into previous)
+    if (content.length > 150) content = content.slice(0, 150);
+    // Skip duplicate messages (e.g. repeated welcomes)
+    const contentKey = content.slice(0, 50);
+    if (seenContents.has(contentKey)) continue;
+    seenContents.add(contentKey);
     if (role === lastRole && chatMessages.length > 1) {
       chatMessages[chatMessages.length - 1].content += "\n" + content;
     } else {
@@ -275,26 +280,25 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
     lastRole = role;
   }
 
-  // Handle current message - multimodal
-  if (mediaType === "image" && mediaUrl && mediaUrl.startsWith("data:")) {
-    chatMessages.push({
-      role: "user",
-      content: [
-        ...(message ? [{ type: "text", text: message }] : [{ type: "text", text: "العميل بعتلك الصورة دي، حللها وردي عليه" }]),
-        { type: "image_url", image_url: { url: mediaUrl } },
-      ],
-    });
-  } else if (mediaType === "audio" && mediaUrl && mediaUrl.startsWith("data:")) {
-    // Send audio as input_audio for models that support it
-    const base64Data = mediaUrl.split(",")[1] || mediaUrl;
-    chatMessages.push({
-      role: "user",
-      content: [
-        { type: "text", text: message || "العميل بعتلك رسالة صوتية، افهمها وردي عليه" },
-        { type: "input_audio", input_audio: { data: base64Data, format: "ogg" } },
-      ],
-    });
+  // Ensure last message is from user (add current message if not in history yet)
+  const lastMsg = chatMessages[chatMessages.length - 1];
+  if (!lastMsg || lastMsg.role !== "user") {
+    const userContent = message || "مرحبا";
+    chatMessages.push({ role: "user", content: userContent });
   }
+
+  // Handle multimodal for OpenRouter only (added later)
+  const multimodalMessage = (mediaType === "image" && mediaUrl && mediaUrl.startsWith("data:"))
+    ? { role: "user", content: [
+        ...(message ? [{ type: "text", text: message }] : [{ type: "text", text: "العميل بعتلك الصورة دي" }]),
+        { type: "image_url", image_url: { url: mediaUrl } },
+      ]}
+    : (mediaType === "audio" && mediaUrl && mediaUrl.startsWith("data:"))
+    ? { role: "user", content: [
+        { type: "text", text: message || "العميل بعتلك رسالة صوتية" },
+        { type: "input_audio", input_audio: { data: mediaUrl.split(",")[1] || mediaUrl, format: "ogg" } },
+      ]}
+    : null;
 
   // Try Lovable AI Gateway first (reliable), then OpenRouter free models as fallback
   let aiReply: string | null = null;
