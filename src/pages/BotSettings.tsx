@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Bot, Brain, Zap, MessageSquare, Plus, Trash2, TestTube,
   Send, BookOpen, Save, Loader2, RefreshCw, Clock, UserCog,
-  Database, Image, FileText, HelpCircle, Sparkles, Upload,
+  Database, Image, FileText, HelpCircle, Sparkles, Upload, Pencil, X,
 } from "lucide-react";
 
 export default function BotSettings() {
