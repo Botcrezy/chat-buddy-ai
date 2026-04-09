@@ -239,6 +239,22 @@ async function startSocket() {
         const phoneNumber = sock.user?.id?.split(':')[0] || '';
         addLog('info', `✅ Connected! Phone: ${phoneNumber}`);
 
+        // Set presence to "available" so contacts see us online
+        try {
+          await sock.sendPresenceUpdate('available');
+          addLog('info', '🟢 Presence set to available (online)');
+        } catch (e) {
+          addLog('warn', 'Failed to set presence', e.message);
+        }
+
+        // Keep-alive: periodically send "available" presence every 5 minutes
+        if (global._presenceInterval) clearInterval(global._presenceInterval);
+        global._presenceInterval = setInterval(async () => {
+          try {
+            if (sock?.user) await sock.sendPresenceUpdate('available');
+          } catch {}
+        }, 5 * 60 * 1000);
+
         await updateStatus({
           status: 'connected',
           phone_number: phoneNumber,
