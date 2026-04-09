@@ -234,7 +234,7 @@ export default function BotSettings() {
               <div className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-l from-primary/5 to-primary/10 border border-primary/10">
                 <div>
                   <Label className="font-bold text-base">الرد التلقائي بالذكاء الاصطناعي</Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">يستخدم Google Gemini للرد الاحترافي</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">يستخدم OpenRouter AI للرد الذكي - يعمل 24/7</p>
                 </div>
                 <Switch checked={settings?.auto_reply_enabled ?? true} onCheckedChange={(v) => setSettings({ ...settings, auto_reply_enabled: v })} />
               </div>
