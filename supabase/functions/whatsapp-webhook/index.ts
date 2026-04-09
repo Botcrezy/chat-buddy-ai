@@ -305,9 +305,9 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
-  // --- PRIMARY: Lovable AI Gateway with retry ---
+  // --- PRIMARY: Lovable AI Gateway ---
   if (LOVABLE_API_KEY) {
-    // Strip multimodal content for Lovable AI
+    // Text-only messages for Lovable AI
     const lovableMessages = chatMessages.map((m: any) => {
       if (Array.isArray(m.content)) {
         const textParts = m.content.filter((p: any) => p.type === "text");
@@ -316,17 +316,14 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
       return m;
     });
 
-    // Try with full context first, then minimal context if null
-    // Retry: keep system + last 4 messages (not just last 1) to preserve context
-    const retryMsgs = lovableMessages.length > 5
-      ? [lovableMessages[0], ...lovableMessages.slice(-4)]
-      : lovableMessages;
-    const minimalMsgs = [lovableMessages[0], ...lovableMessages.slice(-2)];
+    // Build attempts: full → last 3 msgs → just user msg with fresh system
+    const freshSystemMsg = { role: "system", content: `انتي ${botName} من Sity Cloud. ردي بالمصري العامي، جملة مختصرة. ممنوع ايموجي.${continuationHint}` };
+    const userMsg = lovableMessages[lovableMessages.length - 1];
 
     const attempts = [
       { msgs: lovableMessages, model: "google/gemini-2.5-flash" },
-      { msgs: retryMsgs, model: "google/gemini-2.5-flash" },
-      { msgs: minimalMsgs, model: "google/gemini-2.5-flash-lite" },
+      { msgs: [lovableMessages[0], ...lovableMessages.slice(-3)], model: "google/gemini-2.5-flash" },
+      { msgs: [freshSystemMsg, userMsg], model: "google/gemini-2.5-flash-lite" },
     ];
 
     for (const attempt of attempts) {
@@ -341,7 +338,7 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
           body: JSON.stringify({
             model: attempt.model,
             messages: attempt.msgs,
-            max_tokens: 200,
+            max_tokens: 150,
             temperature: 0.7,
           }),
         });
@@ -349,15 +346,15 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
         if (aiResponse.ok) {
           const aiData = await aiResponse.json();
           const rawContent = aiData.choices?.[0]?.message?.content;
-          if (rawContent) {
+          if (rawContent && rawContent.trim().length > 2) {
             aiReply = rawContent;
             console.log("Success with Lovable AI");
             break;
           }
-          console.log("Lovable AI returned empty, retrying with less context");
+          console.log("Lovable AI returned empty, retrying");
         } else {
           console.error(`Lovable AI error: ${aiResponse.status}`);
-          break; // Don't retry on auth/rate limit errors
+          break;
         }
       } catch (e) {
         console.error("Lovable AI exception:", e);
