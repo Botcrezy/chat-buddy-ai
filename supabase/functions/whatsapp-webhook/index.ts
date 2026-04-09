@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
       conversation = newConv;
     }
 
-    const msgContent = message || (media_type === "image" ? "صورة" : "ملف");
+    const msgContent = message || (media_type === "image" ? "صورة" : media_type === "audio" ? "رسالة صوتية" : "ملف");
     await supabase.from("messages").insert({
       conversation_id: conversation.id,
       content: msgContent,
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     let aiReply = null;
     let aiMediaUrl = null;
     if (conversation.is_ai_active) {
-      const result = await generateAIReply(supabase, conversation, contact, message);
+      const result = await generateAIReply(supabase, conversation, contact, message, media_url, media_type);
       aiReply = result.reply;
       aiMediaUrl = result.mediaUrl;
     }
@@ -104,7 +104,35 @@ Deno.serve(async (req) => {
   }
 });
 
-async function generateAIReply(supabase: any, conversation: any, contact: any, message: string) {
+// ===== Web Search via DuckDuckGo =====
+async function webSearch(query: string): Promise<string> {
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SityBot/1.0)" },
+    });
+    if (!res.ok) return "";
+    const html = await res.text();
+    // Extract snippets from result__snippet class
+    const snippets: string[] = [];
+    const regex = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+      const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      if (text.length > 20) snippets.push(text);
+    }
+    return snippets.join("\n");
+  } catch (e) {
+    console.error("Web search error:", e);
+    return "";
+  }
+}
+
+// ===== AI Reply Generation =====
+async function generateAIReply(
+  supabase: any, conversation: any, contact: any, 
+  message: string, mediaUrl?: string, mediaType?: string
+) {
   const { data: botSettings } = await supabase
     .from("bot_settings")
     .select("*")
@@ -155,42 +183,81 @@ async function generateAIReply(supabase: any, conversation: any, contact: any, m
   const contactName = contact.whatsapp_name || contact.name || contact.phone;
   const botName = botSettings?.bot_name || "مرام";
 
-  const systemPrompt = `انتي ${botName}، من فريق خدمة العملاء في شركة Sity Cloud. اونلاين 24/7.
+  const systemPrompt = `انتي ${botName}، موظفة خدمة عملاء حقيقية في شركة Sity Cloud. اونلاين 24/7.
+
+شخصيتك:
+- بنت مصرية لطيفة ومهنية بتتكلم عامية مصرية طبيعية
+- بتتعاملي كأنك إنسانة حقيقية مش بوت - لو حد سألك قولي "انا ${botName} من فريق Sity Cloud"
+- بتفهمي العميل وبتحسسيه إنك مهتمة بيه فعلاً
 
 قواعد صارمة:
-1. ممنوع تماما استخدام اي ايموجي او رموز تعبيرية في الردود - لا ايموجي نهائيا
-2. لا تقولي انك ذكاء اصطناعي او بوت - لو حد سالك قولي "انا ${botName} من فريق Sity Cloud"
-3. لا تتكلمي عن اي حاجة مش موجودة في بيانات التدريب - لو مش عارفة قولي "خليني اتاكد من الفريق وارجعلك حالا"
-4. لا تخترعي معلومات او اسعار مش مذكورة في البيانات
-5. ردي بشكل مختصر ومهني - جملتين لـ 4 جمل كحد اقصى
-6. اتكلمي بالمصري العامي بشكل طبيعي ومهني ولطيف
-7. لو العميل طلب حد بشري او دعم فني او عنده مشكلة كبيرة، ابدئي ردك بـ [ESCALATE] وبعدين الرد الطبيعي
+1. ممنوع تماماً اي ايموجي او رموز تعبيرية - لا ايموجي ولا رموز نهائي
+2. متقوليش إنك AI أو بوت أبداً
+3. التزمي فقط بالمعلومات الموجودة في بيانات التدريب - لو مش عارفة حاجة قولي "خليني اتأكد من الفريق وارجعلك"
+4. متخترعيش معلومات أو أسعار مش موجودة
+5. الردود تكون مختصرة ومفيدة - من جملة لـ 3 جمل. متتكلميش كتير
+6. استخدمي اسم العميل مرة واحدة بس في أول رد، بعد كده متكرريش اسمه
+7. لو العميل طلب دعم بشري أو عنده مشكلة كبيرة، ابدئي بـ [ESCALATE]
+8. لو العميل بعت صورة، حللي الصورة وردي عليه بناءً على محتواها
+9. لو العميل بعت رسالة صوتية، افهمي المحتوى وردي عليه
+10. لو محتاجة معلومة مش موجودة في التدريب وممكن تتلاقي على الإنترنت، ابحثي وردي
 
-${botSettings?.personality ? `\nتعليمات الادارة:\n${botSettings.personality}` : ""}
+${botSettings?.personality ? `\nتعليمات إضافية:\n${botSettings.personality}` : ""}
 
-العميل "${contactName}":
-${memoryText || "عميل جديد"}
-${contact.summary ? `ملخص: ${contact.summary}` : ""}
+معلومات العميل "${contactName}":
+${memoryText || "عميل جديد - اترحبي بيه"}
+${contact.summary ? `ملخص سابق: ${contact.summary}` : ""}
 
-بيانات التدريب (المصدر الوحيد للمعلومات):
+بيانات التدريب (المصدر الرئيسي للمعلومات):
 ${knowledgeText || ""}
 ${faqText || ""}
 ${faqKnowledge || ""}
 
-صور متاحة:
+صور متاحة للإرسال:
 ${imageKnowledge || "لا يوجد"}
-لو العميل سال عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
+لو العميل سأل عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
 
 ردود جاهزة:
 ${quickRepliesText || "لا يوجد"}`;
 
-  const chatMessages = [
+  // Build chat messages with multimodal support
+  const chatMessages: any[] = [
     { role: "system", content: systemPrompt },
-    ...(history).map((m: any) => ({
-      role: m.direction === "in" ? "user" : "assistant",
-      content: m.media_type && !m.content ? `[${m.media_type === "image" ? "صورة" : "ملف"} مرفق]` : m.content,
-    })),
   ];
+
+  // Add history
+  for (const m of history) {
+    chatMessages.push({
+      role: m.direction === "in" ? "user" : "assistant",
+      content: m.media_type && !m.content ? `[${m.media_type === "image" ? "صورة" : m.media_type === "audio" ? "رسالة صوتية" : "ملف"} مرفق]` : m.content,
+    });
+  }
+
+  // Handle current message with multimodal content
+  if (mediaType === "image" && mediaUrl && mediaUrl.startsWith("data:")) {
+    // Image sent by customer - use multimodal vision
+    const userContent: any[] = [];
+    if (message) userContent.push({ type: "text", text: message });
+    userContent.push({
+      type: "image_url",
+      image_url: { url: mediaUrl },
+    });
+    // Replace last user message or add new one
+    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
+      chatMessages[chatMessages.length - 1].content = userContent;
+    } else {
+      chatMessages.push({ role: "user", content: userContent });
+    }
+  } else if (mediaType === "audio" && mediaUrl && mediaUrl.startsWith("data:")) {
+    // Voice note - ask AI to understand it as context
+    // Since free models may not support audio directly, we'll add it as context
+    const audioNote = "العميل بعت رسالة صوتية. حاولي تفهمي من سياق المحادثة وردي عليه. لو مش قادرة تفهمي الصوت، اسأليه يكتب رسالته.";
+    if (chatMessages.length > 0 && chatMessages[chatMessages.length - 1].role === "user") {
+      chatMessages[chatMessages.length - 1].content = audioNote;
+    } else {
+      chatMessages.push({ role: "user", content: audioNote });
+    }
+  }
 
   // Use OpenRouter with fallback models
   const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -229,7 +296,7 @@ ${quickRepliesText || "لا يوجد"}`;
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
         console.error(`Model ${model} error: ${aiResponse.status}`, errText);
-        continue; // Try next model
+        continue;
       }
 
       const aiData = await aiResponse.json();
@@ -246,8 +313,11 @@ ${quickRepliesText || "لا يوجد"}`;
 
   if (!aiReply) return { reply: null, mediaUrl: null };
 
-  // Strip any emoji that might slip through
+  // Strip any emoji
   aiReply = aiReply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
+
+  // Remove thinking tags if present (some models add <think>...</think>)
+  aiReply = aiReply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
   // Check for escalation
   let needsEscalation = false;
@@ -264,14 +334,13 @@ ${quickRepliesText || "لا يوجد"}`;
     aiReply = aiReply.replace(/\[IMAGE:https?:\/\/[^\]]+\]/g, "").trim();
   }
 
-  // Check if AI couldn't answer
-  if (aiReply.includes("اتاكد من الزملاء") || aiReply.includes("احول لموظف") || aiReply.includes("ساحول سؤالك") || needsEscalation) {
+  // Check if AI couldn't answer - escalate
+  if (aiReply.includes("اتاكد من الفريق") || aiReply.includes("احول لموظف") || aiReply.includes("ساحول سؤالك") || needsEscalation) {
     await supabase
       .from("conversations")
       .update({ is_ai_active: false, status: "waiting" })
       .eq("id", conversation.id);
 
-    // Send admin notification via Baileys
     notifyAdmin(supabase, contactName, contact.phone, message).catch(console.error);
   }
 
@@ -295,6 +364,7 @@ ${quickRepliesText || "لا يوجد"}`;
   return { reply: aiReply, mediaUrl: aiMediaUrl };
 }
 
+// ===== Admin Notification =====
 async function notifyAdmin(supabase: any, customerName: string, customerPhone: string, customerMessage: string) {
   try {
     const { data: botSettings } = await supabase
@@ -304,20 +374,14 @@ async function notifyAdmin(supabase: any, customerName: string, customerPhone: s
       .single();
 
     const serverUrl = botSettings?.baileys_server_url;
-    if (!serverUrl) {
-      console.error("No baileys server URL for admin notification");
-      return;
-    }
+    if (!serverUrl) return;
 
     const adminMsg = `تنبيه - طلب دعم بشري\n\nالعميل: ${customerName}\nالرقم: ${customerPhone}\nالرسالة: ${customerMessage}\n\nيرجى التواصل مع العميل في اقرب وقت.`;
 
     await fetch(`${serverUrl}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        phone: ADMIN_PHONE,
-        message: adminMsg,
-      }),
+      body: JSON.stringify({ phone: ADMIN_PHONE, message: adminMsg }),
     });
     console.log("Admin notification sent to", ADMIN_PHONE);
   } catch (e) {
@@ -325,6 +389,7 @@ async function notifyAdmin(supabase: any, customerName: string, customerPhone: s
   }
 }
 
+// ===== Memory Extraction =====
 async function extractMemory(supabase: any, contactId: string, userMsg: string, aiReply: string) {
   try {
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -361,6 +426,9 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
       } catch { continue; }
     }
     if (!content || content === "[]") return;
+
+    // Remove thinking tags
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
     const jsonMatch = content.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
