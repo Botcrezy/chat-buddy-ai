@@ -405,7 +405,7 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
 
 رسالة العميل: ${userMsg}`;
 
-    const memModels = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "qwen/qwen3-next-80b-a3b-instruct:free"];
+    const memModels = ["google/gemma-4-31b-it:free", "meta-llama/llama-4-scout:free", "qwen/qwen3-next-80b-a3b-instruct:free", "deepseek/deepseek-chat-v3-0324:free"];
     let content: string | null = null;
 
     for (const model of memModels) {
