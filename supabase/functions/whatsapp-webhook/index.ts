@@ -335,22 +335,30 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
 
 رسالة العميل: ${userMsg}`;
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": "https://sityai.lovable.app",
-      },
-      body: JSON.stringify({
-        model: "google/gemma-4-31b-it:free",
-        messages: [{ role: "user", content: extractPrompt }],
-        max_tokens: 300,
-      }),
-    });
+    const memModels = ["google/gemma-4-31b-it:free", "meta-llama/llama-4-maverick:free", "mistralai/mistral-small-3.1-24b-instruct:free"];
+    let content: string | null = null;
 
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
+    for (const model of memModels) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            "HTTP-Referer": "https://sityai.lovable.app",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: extractPrompt }],
+            max_tokens: 300,
+          }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        content = data.choices?.[0]?.message?.content?.trim();
+        if (content) break;
+      } catch { continue; }
+    }
     if (!content || content === "[]") return;
 
     const jsonMatch = content.match(/\[[\s\S]*\]/);
