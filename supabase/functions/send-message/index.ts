@@ -23,14 +23,15 @@ Deno.serve(async (req) => {
     }
 
     // Get conversation with contact
-    const { data: conversation } = await supabase
+    const { data: conversation, error: convError } = await supabase
       .from("conversations")
       .select("*, contacts(*)")
       .eq("id", conversation_id)
       .single();
 
-    if (!conversation) {
-      return new Response(JSON.stringify({ error: "Conversation not found" }), {
+    if (convError || !conversation) {
+      console.error("Conversation lookup error:", convError);
+      return new Response(JSON.stringify({ error: "Conversation not found", details: convError?.message }), {
         status: 404, headers: { ...corsH, "Content-Type": "application/json" },
       });
     }
@@ -47,30 +48,43 @@ Deno.serve(async (req) => {
 
     // Send via WhatsApp
     let whatsappSent = false;
+    let whatsappError = null;
     if (serverUrl && phone) {
       try {
+        console.log(`Sending to ${phone} via ${serverUrl}/send`);
         const res = await fetch(`${serverUrl}/send`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phone, message: content }),
         });
+        const responseText = await res.text();
         if (res.ok) {
           whatsappSent = true;
+          console.log(`WhatsApp sent OK to ${phone}`);
         } else {
-          console.error("Baileys send failed:", await res.text());
+          whatsappError = responseText;
+          console.error(`Baileys send failed (${res.status}):`, responseText);
         }
       } catch (e) {
-        console.error("Baileys send error:", e);
+        whatsappError = e.message;
+        console.error("Baileys send error:", e.message);
       }
+    } else {
+      whatsappError = !serverUrl ? "No baileys_server_url configured" : "No phone number for contact";
+      console.error("Cannot send WhatsApp:", whatsappError);
     }
 
     // Save the message
-    await supabase.from("messages").insert({
+    const { error: msgError } = await supabase.from("messages").insert({
       conversation_id,
       content,
       direction: "out",
       sender_type: "agent",
     });
+
+    if (msgError) {
+      console.error("Message save error:", msgError);
+    }
 
     // Update conversation
     await supabase
@@ -79,7 +93,7 @@ Deno.serve(async (req) => {
       .eq("id", conversation_id);
 
     return new Response(
-      JSON.stringify({ success: true, whatsapp_sent: whatsappSent, phone }),
+      JSON.stringify({ success: true, whatsapp_sent: whatsappSent, phone, whatsapp_error: whatsappError }),
       { headers: { ...corsH, "Content-Type": "application/json" } }
     );
   } catch (error) {
