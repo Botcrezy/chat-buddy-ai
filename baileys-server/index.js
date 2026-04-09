@@ -167,7 +167,7 @@ async function startSocket() {
       generateHighQualityLinkPreview: true,
       browser: Browsers.ubuntu('WhatsApp Bot'),
       syncFullHistory: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
       retryRequestDelayMs: 500,
     });
