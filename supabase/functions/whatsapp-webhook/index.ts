@@ -284,18 +284,23 @@ ${faqText.slice(0, 2000)}
     return { reply: null, mediaUrl: null };
   }
 
-  // Primary models for text, multimodal-capable models for images/audio
+  // Use openrouter/free router first (auto-picks available free model), then specific fallbacks
   const isMultimodal = (mediaType === "image" || mediaType === "audio") && mediaUrl;
   const models = isMultimodal
     ? [
         "google/gemma-4-31b-it:free",
-        "microsoft/phi-4-multimodal-instruct:free",
+        "nvidia/nemotron-nano-12b-v2-vl:free",
+        "google/gemma-3-27b-it:free",
         "google/gemma-4-26b-a4b-it:free",
       ]
     : [
+        "openrouter/free",
         "google/gemma-4-31b-it:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "openai/gpt-oss-120b:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemma-4-26b-a4b-it:free",
-        "deepseek/deepseek-chat-v3-0324:free",
+        "minimax/minimax-m2.5:free",
         "qwen/qwen3-next-80b-a3b-instruct:free",
       ];
 
