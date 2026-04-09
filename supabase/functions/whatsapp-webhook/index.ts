@@ -293,7 +293,7 @@ ${faqText.slice(0, 1500)}
   if (LOVABLE_API_KEY) {
     try {
       console.log("Trying Lovable AI Gateway");
-      // For multimodal, strip non-text content for Lovable AI
+      // For multimodal, strip non-text content
       const lovableMessages = chatMessages.map((m: any) => {
         if (Array.isArray(m.content)) {
           const textParts = m.content.filter((p: any) => p.type === "text");
@@ -302,6 +302,9 @@ ${faqText.slice(0, 1500)}
         return m;
       });
 
+      // Log message count and last user message for debugging
+      console.log(`Sending ${lovableMessages.length} messages, system prompt length: ${lovableMessages[0]?.content?.length}`);
+
       const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -309,7 +312,7 @@ ${faqText.slice(0, 1500)}
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
+          model: "google/gemini-2.5-flash-lite",
           messages: lovableMessages,
           max_tokens: 200,
           temperature: 0.6,
