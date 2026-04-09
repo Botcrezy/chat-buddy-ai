@@ -294,6 +294,7 @@ ${quickRepliesText || "لا يوجد"}`;
           model,
           messages: chatMessages,
           max_tokens: 400,
+          temperature: 0.7,
         }),
       });
 
