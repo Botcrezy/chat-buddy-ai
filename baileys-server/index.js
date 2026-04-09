@@ -317,6 +317,14 @@ async function startSocket() {
           mediaType = 'document';
         } else if (msg.message.audioMessage) {
           mediaType = 'audio';
+          try {
+            const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+            const buffer = await downloadMediaMessage(msg, 'buffer', {});
+            mediaUrl = `data:audio/ogg;base64,${buffer.toString('base64')}`;
+            addLog('info', `🎤 Audio downloaded: ${buffer.length} bytes`);
+          } catch (e) {
+            addLog('error', 'Audio download error', e.message);
+          }
         } else if (msg.message.videoMessage) {
           textContent = msg.message.videoMessage.caption || '';
           mediaType = 'video';
