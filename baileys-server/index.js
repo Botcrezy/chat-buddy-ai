@@ -99,6 +99,7 @@ async function sendWebhook(data) {
     return null;
   }
   try {
+    addLog('info', `📤 Sending webhook for phone: ${data.phone}`);
     const res = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: {
@@ -107,7 +108,14 @@ async function sendWebhook(data) {
       },
       body: JSON.stringify(data),
     });
-    return await res.json();
+    const responseText = await res.text();
+    addLog('info', `📥 Webhook response: ${res.status} - ${responseText.slice(0, 300)}`);
+    try {
+      return JSON.parse(responseText);
+    } catch {
+      addLog('error', 'Webhook response not JSON', responseText.slice(0, 200));
+      return null;
+    }
   } catch (e) {
     addLog('error', 'Webhook error', e.message);
     return null;
@@ -167,7 +175,7 @@ async function startSocket() {
       generateHighQualityLinkPreview: true,
       browser: Browsers.ubuntu('WhatsApp Bot'),
       syncFullHistory: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
       retryRequestDelayMs: 500,
     });
@@ -231,6 +239,22 @@ async function startSocket() {
         const phoneNumber = sock.user?.id?.split(':')[0] || '';
         addLog('info', `✅ Connected! Phone: ${phoneNumber}`);
 
+        // Set presence to "available" so contacts see us online
+        try {
+          await sock.sendPresenceUpdate('available');
+          addLog('info', '🟢 Presence set to available (online)');
+        } catch (e) {
+          addLog('warn', 'Failed to set presence', e.message);
+        }
+
+        // Keep-alive: periodically send "available" presence every 5 minutes
+        if (global._presenceInterval) clearInterval(global._presenceInterval);
+        global._presenceInterval = setInterval(async () => {
+          try {
+            if (sock?.user) await sock.sendPresenceUpdate('available');
+          } catch {}
+        }, 5 * 60 * 1000);
+
         await updateStatus({
           status: 'connected',
           phone_number: phoneNumber,
@@ -247,8 +271,14 @@ async function startSocket() {
         if (msg.key.fromMe) continue;
         if (!msg.message) continue;
 
-        const phone = msg.key.remoteJid?.replace('@s.whatsapp.net', '') || '';
-        if (!phone || phone.includes('@g.us')) continue;
+        const remoteJid = msg.key.remoteJid || '';
+        // Skip group messages
+        if (remoteJid.includes('@g.us')) continue;
+        // Extract clean phone number from any JID format (@s.whatsapp.net, @lid, etc.)
+        const phone = remoteJid.split('@')[0] || '';
+        if (!phone) continue;
+
+        addLog('info', `📞 JID: ${remoteJid}, Phone: ${phone}`);
 
         const pushName = msg.pushName || '';
 
