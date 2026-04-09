@@ -289,50 +289,58 @@ ${faqText.slice(0, 1500)}
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
-  // --- PRIMARY: Lovable AI Gateway ---
+  // --- PRIMARY: Lovable AI Gateway with retry ---
   if (LOVABLE_API_KEY) {
-    try {
-      console.log("Trying Lovable AI Gateway");
-      // For multimodal, strip non-text content
-      const lovableMessages = chatMessages.map((m: any) => {
-        if (Array.isArray(m.content)) {
-          const textParts = m.content.filter((p: any) => p.type === "text");
-          return { ...m, content: textParts.map((p: any) => p.text).join(" ") };
-        }
-        return m;
-      });
-
-      // Log message count and last user message for debugging
-      console.log(`Sending ${lovableMessages.length} messages, system prompt length: ${lovableMessages[0]?.content?.length}`);
-
-      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash-lite",
-          messages: lovableMessages,
-          max_tokens: 200,
-          temperature: 0.6,
-        }),
-      });
-
-      if (aiResponse.ok) {
-        const aiData = await aiResponse.json();
-        console.log("Lovable AI full choices:", JSON.stringify(aiData.choices).slice(0, 500));
-        const choice = aiData.choices?.[0];
-        const rawContent = choice?.message?.content ?? choice?.text ?? "";
-        aiReply = rawContent || null;
-        if (aiReply) console.log("Success with Lovable AI Gateway");
-        else console.error("Lovable AI: empty content, finish_reason:", choice?.finish_reason);
-      } else {
-        const errBody = await aiResponse.text();
-        console.error(`Lovable AI error ${aiResponse.status}: ${errBody.slice(0, 300)}`);
+    // Strip multimodal content for Lovable AI
+    const lovableMessages = chatMessages.map((m: any) => {
+      if (Array.isArray(m.content)) {
+        const textParts = m.content.filter((p: any) => p.type === "text");
+        return { ...m, content: textParts.map((p: any) => p.text).join(" ") };
       }
-    } catch (e) {
-      console.error("Lovable AI exception:", e);
+      return m;
+    });
+
+    // Try with full context first, then minimal context if null
+    const attempts = [
+      { msgs: lovableMessages, model: "google/gemini-2.5-flash" },
+      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash" },
+      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash-lite" },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        console.log(`Lovable AI: ${attempt.model}, ${attempt.msgs.length} msgs`);
+        const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: attempt.model,
+            messages: attempt.msgs,
+            max_tokens: 200,
+            temperature: 0.7,
+          }),
+        });
+
+        if (aiResponse.ok) {
+          const aiData = await aiResponse.json();
+          const rawContent = aiData.choices?.[0]?.message?.content;
+          if (rawContent) {
+            aiReply = rawContent;
+            console.log("Success with Lovable AI");
+            break;
+          }
+          console.log("Lovable AI returned empty, retrying with less context");
+        } else {
+          console.error(`Lovable AI error: ${aiResponse.status}`);
+          break; // Don't retry on auth/rate limit errors
+        }
+      } catch (e) {
+        console.error("Lovable AI exception:", e);
+        break;
+      }
     }
   }
 
