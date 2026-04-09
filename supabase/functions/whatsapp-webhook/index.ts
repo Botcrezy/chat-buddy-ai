@@ -247,12 +247,15 @@ ${faqText.slice(0, 1500)}
   // Build messages
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 8 messages only to keep context small
+  // Add last 8 messages only, truncate long ones to prevent context pollution
   const recentHistory = history.slice(-8);
   for (const m of recentHistory) {
+    let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
+    // Truncate any message longer than 200 chars (likely leaked reasoning)
+    if (content.length > 200) content = content.slice(0, 200);
     chatMessages.push({
       role: m.direction === "in" ? "user" : "assistant",
-      content: m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية"),
+      content,
     });
   }
 
