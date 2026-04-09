@@ -313,10 +313,16 @@ ${imageKnowledge ? `\nصور: ${imageKnowledge.slice(0, 300)}` : ""}`;
     });
 
     // Try with full context first, then minimal context if null
+    // Retry: keep system + last 4 messages (not just last 1) to preserve context
+    const retryMsgs = lovableMessages.length > 5
+      ? [lovableMessages[0], ...lovableMessages.slice(-4)]
+      : lovableMessages;
+    const minimalMsgs = [lovableMessages[0], ...lovableMessages.slice(-2)];
+
     const attempts = [
       { msgs: lovableMessages, model: "google/gemini-2.5-flash" },
-      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash" },
-      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash-lite" },
+      { msgs: retryMsgs, model: "google/gemini-2.5-flash" },
+      { msgs: minimalMsgs, model: "google/gemini-2.5-flash-lite" },
     ];
 
     for (const attempt of attempts) {
