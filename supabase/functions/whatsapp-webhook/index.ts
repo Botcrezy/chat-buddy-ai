@@ -298,13 +298,16 @@ async function generateAIReply(
   const hasHistory = history.length > 2;
   const isFirstMessage = history.length <= 1;
 
-  // Build smart context hints
+  // Build smart context hints - NEVER repeat customer name after first message
   let contextHints = "";
   if (isShortMsg && hasHistory) {
-    contextHints += "\nدي رسالة متابعة من العميل مش رسالة جديدة - كملي الكلام معاه طبيعي ومتقوليش أهلاً تاني ومتسأليش ازاي اساعدك.";
+    contextHints += "\nدي رسالة متابعة - كملي طبيعي ومتقوليش أهلاً ومتسأليش ازاي اساعدك ومتقوليش اسمه.";
   }
   if (isFirstMessage) {
-    contextHints += `\nدي أول رسالة من العميل اسمه ${contactName} - رحبي بيه مرة واحدة بس.`;
+    contextHints += `\nأول رسالة من العميل اسمه ${contactName} - رحبي مرة واحدة بس ومتكرريش اسمه بعد كده خالص.`;
+  }
+  if (hasHistory && !isFirstMessage) {
+    contextHints += "\nممنوع تقولي اسم العميل تاني - انتي عارفاه خلاص.";
   }
 
   // Handle media descriptions
@@ -430,7 +433,7 @@ ${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`
           body: JSON.stringify({
             model: attempt.model,
             messages: attempt.msgs,
-            max_tokens: 300,
+            max_tokens: 200,
             temperature: 0.8,
           }),
         });
@@ -487,7 +490,7 @@ ${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`
             Authorization: `Bearer ${OPENROUTER_API_KEY}`,
             "HTTP-Referer": "https://sityai.lovable.app",
           },
-          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 300, temperature: 0.8 }),
+          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 200, temperature: 0.8 }),
         });
 
         if (!aiResponse.ok) { console.error(`${model}: ${aiResponse.status}`); continue; }
@@ -572,6 +575,10 @@ function cleanAIReply(reply: string): string {
   reply = reply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
   // Remove markdown bold
   reply = reply.replace(/\*+/g, "").trim();
+  // Convert markdown links [text](url) to just url (WhatsApp doesn't support markdown links)
+  reply = reply.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, "$2").trim();
+  // Remove remaining markdown formatting
+  reply = reply.replace(/[_~`#>]/g, "").trim();
 
   // Trim overly long responses
   if (reply.length > 400) {
