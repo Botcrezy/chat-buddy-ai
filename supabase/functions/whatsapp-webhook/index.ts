@@ -218,7 +218,9 @@ ${imageKnowledge || "لا يوجد"}
 لو العميل سأل عن حاجة ليها صورة، حطي الرابط كده: [IMAGE:رابط_الصورة]
 
 ردود جاهزة:
-${quickRepliesText || "لا يوجد"}`;
+${quickRepliesText || "لا يوجد"}
+
+مهم جدا: اكتبي الرد النهائي فقط اللي هيتبعت للعميل مباشرة. متكتبيش تحليل أو تفكير أو شرح. رد واحد مباشر بس.`;
 
   // Build chat messages with multimodal support
   const chatMessages: any[] = [
