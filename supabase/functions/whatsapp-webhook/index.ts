@@ -247,16 +247,20 @@ ${faqText.slice(0, 1500)}
   // Build messages
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 8 messages only, truncate long ones to prevent context pollution
+  // Add last 8 messages, truncate long ones, deduplicate consecutive same-role
   const recentHistory = history.slice(-8);
+  let lastRole = "system";
   for (const m of recentHistory) {
+    const role = m.direction === "in" ? "user" : "assistant";
     let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
-    // Truncate any message longer than 200 chars (likely leaked reasoning)
     if (content.length > 200) content = content.slice(0, 200);
-    chatMessages.push({
-      role: m.direction === "in" ? "user" : "assistant",
-      content,
-    });
+    // Skip if same role as last (merge into previous)
+    if (role === lastRole && chatMessages.length > 1) {
+      chatMessages[chatMessages.length - 1].content += "\n" + content;
+    } else {
+      chatMessages.push({ role, content });
+    }
+    lastRole = role;
   }
 
   // Handle current message - multimodal
