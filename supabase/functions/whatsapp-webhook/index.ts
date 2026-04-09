@@ -192,36 +192,57 @@ ${quickRepliesText || "لا يوجد"}`;
     })),
   ];
 
-  // Use OpenRouter with google/gemma-4-31b-it:free
+  // Use OpenRouter with fallback models
   const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
   if (!OPENROUTER_API_KEY) {
     console.error("OPENROUTER_API_KEY not configured");
     return { reply: null, mediaUrl: null };
   }
 
-  const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "HTTP-Referer": "https://sityai.lovable.app",
-      "X-Title": "Sity Cloud Bot",
-    },
-    body: JSON.stringify({
-      model: "google/gemma-4-31b-it:free",
-      messages: chatMessages,
-      max_tokens: 400,
-    }),
-  });
+  const models = [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+  ];
 
-  if (!aiResponse.ok) {
-    const errText = await aiResponse.text();
-    console.error("OpenRouter error:", aiResponse.status, errText);
-    return { reply: null, mediaUrl: null };
+  let aiReply: string | null = null;
+
+  for (const model of models) {
+    try {
+      console.log(`Trying model: ${model}`);
+      const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          "HTTP-Referer": "https://sityai.lovable.app",
+          "X-Title": "Sity Cloud Bot",
+        },
+        body: JSON.stringify({
+          model,
+          messages: chatMessages,
+          max_tokens: 400,
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text();
+        console.error(`Model ${model} error: ${aiResponse.status}`, errText);
+        continue; // Try next model
+      }
+
+      const aiData = await aiResponse.json();
+      aiReply = aiData.choices?.[0]?.message?.content;
+      if (aiReply) {
+        console.log(`Success with model: ${model}`);
+        break;
+      }
+    } catch (e) {
+      console.error(`Model ${model} exception:`, e);
+      continue;
+    }
   }
-
-  const aiData = await aiResponse.json();
-  let aiReply = aiData.choices?.[0]?.message?.content;
 
   if (!aiReply) return { reply: null, mediaUrl: null };
 
@@ -315,22 +336,30 @@ async function extractMemory(supabase: any, contactId: string, userMsg: string, 
 
 رسالة العميل: ${userMsg}`;
 
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-        "HTTP-Referer": "https://sityai.lovable.app",
-      },
-      body: JSON.stringify({
-        model: "google/gemma-4-31b-it:free",
-        messages: [{ role: "user", content: extractPrompt }],
-        max_tokens: 300,
-      }),
-    });
+    const memModels = ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "qwen/qwen3-next-80b-a3b-instruct:free"];
+    let content: string | null = null;
 
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
+    for (const model of memModels) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            "HTTP-Referer": "https://sityai.lovable.app",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: extractPrompt }],
+            max_tokens: 300,
+          }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        content = data.choices?.[0]?.message?.content?.trim();
+        if (content) break;
+      } catch { continue; }
+    }
     if (!content || content === "[]") return;
 
     const jsonMatch = content.match(/\[[\s\S]*\]/);
