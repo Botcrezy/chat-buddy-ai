@@ -281,23 +281,9 @@ ${quickRepliesText || "لا يوجد"}
 
   let aiReply: string | null = null;
 
-  // Add a final instruction to prevent reasoning output
-  chatMessages.push({ role: "user", content: message || "مرحبا" });
-  // Remove duplicate if already added
-  if (chatMessages.length > 2 && chatMessages[chatMessages.length - 1].content === chatMessages[chatMessages.length - 2].content) {
-    chatMessages.pop();
-  }
-
   for (const model of models) {
     try {
       console.log(`Trying model: ${model}`);
-      const requestBody: any = {
-        model,
-        messages: chatMessages,
-        max_tokens: 300,
-        temperature: 0.7,
-      };
-
       const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -306,7 +292,12 @@ ${quickRepliesText || "لا يوجد"}
           "HTTP-Referer": "https://sityai.lovable.app",
           "X-Title": "Sity Cloud Bot",
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          model,
+          messages: chatMessages,
+          max_tokens: 300,
+          temperature: 0.7,
+        }),
       });
 
       if (!aiResponse.ok) {
@@ -329,23 +320,60 @@ ${quickRepliesText || "لا يوجد"}
 
   if (!aiReply) return { reply: null, mediaUrl: null };
 
-  // Remove thinking tags if present (some models add <think>...</think>)
+  // ===== CLEANUP AI OUTPUT =====
+  // 1. Remove <think>...</think> tags
   aiReply = aiReply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
-  // Remove English reasoning that some models output before the Arabic reply
-  if (aiReply.length > 300 && /^[A-Za-z\[\(]/.test(aiReply)) {
-    // Find where Arabic content starts
-    const arabicStart = aiReply.search(/[\u0600-\u06FF]/);
-    if (arabicStart > 0) {
-      // Find the start of the actual Arabic reply paragraph
-      const before = aiReply.substring(0, arabicStart);
-      const lastNewline = before.lastIndexOf("\n");
-      aiReply = aiReply.substring(lastNewline >= 0 ? lastNewline + 1 : arabicStart).trim();
+  // 2. Remove reasoning patterns (Arabic or English) - look for the actual customer-facing reply
+  // Many models output analysis like "العميل سأل عن..." or "لازم أرد..." before the actual reply
+  // The actual reply usually starts with greeting words or direct answers
+  const replyStarters = /^(وعليكم|أهلا|مرحبا|تمام|أيوه|فاهمة|طبعا|شكرا|العفو|أنا مرام|أنا م|عندنا|ممكن|خليني|حلو|سعيدة|صباح|مساء|يا هلا|نورت|أهلاً|هلا|Hi |Hello|Welcome|هاي|أنا فاهم|أنا آسف|بياناتك|تقدر|الباقة|سؤال حلو|ده غالبا|جرب|حاليا|من خلال|بنرحب|كل دورة|أيوه!|ببساطة|ووردبريس|ويكس|شوبيفاي|GoDaddy)/;
+
+  if (aiReply.length > 200) {
+    const lines = aiReply.split("\n");
+    let replyStartIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (replyStarters.test(line)) {
+        replyStartIdx = i;
+        break;
+      }
+    }
+    if (replyStartIdx > 0) {
+      aiReply = lines.slice(replyStartIdx).join("\n").trim();
     }
   }
 
-  // Strip any emoji
+  // 3. If still too long (reasoning mixed in), try to extract just sentences without analysis patterns
+  if (aiReply.length > 400) {
+    // Remove lines that look like reasoning
+    const cleanLines = aiReply.split("\n").filter(line => {
+      const t = line.trim();
+      if (!t) return false;
+      // Skip reasoning lines
+      if (/^(العميل |لازم |أولا|ثانيا|ملاحظة|السيناريو|التعليمات|بيانات التدريب|لقيت|أتحقق|أبدأ|أذكر|أكتفي|ده يتوافق|لكن|ربما|كمان|حسب|بناء|المطلوب|الخطوة)/i.test(t)) return false;
+      if (/^\[.*\]$/.test(t) && !t.startsWith("[ESCALATE]") && !t.startsWith("[IMAGE:")) return false;
+      return true;
+    });
+    if (cleanLines.length > 0) {
+      aiReply = cleanLines.join("\n").trim();
+    }
+  }
+
+  // 4. Truncate if still too long
+  if (aiReply.length > 500) {
+    const sentences = aiReply.split(/[.؟?!]\s*/);
+    let result = "";
+    for (const s of sentences) {
+      if ((result + s).length > 400) break;
+      result += (result ? ". " : "") + s;
+    }
+    if (result.length > 20) aiReply = result;
+  }
+
+  // 5. Strip emoji
   aiReply = aiReply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
+
 
   // Check for escalation
   let needsEscalation = false;
