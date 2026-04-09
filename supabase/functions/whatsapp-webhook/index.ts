@@ -201,8 +201,9 @@ ${quickRepliesText || "لا يوجد"}`;
 
   const models = [
     "google/gemma-4-31b-it:free",
-    "meta-llama/llama-4-maverick:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
   ];
 
   let aiReply: string | null = null;
