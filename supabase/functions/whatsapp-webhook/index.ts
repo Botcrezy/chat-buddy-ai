@@ -277,81 +277,95 @@ ${faqText.slice(0, 2000)}
     });
   }
 
-  // Models ordered by quality for short Arabic replies
-  const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-  if (!OPENROUTER_API_KEY) {
-    console.error("OPENROUTER_API_KEY not configured");
-    return { reply: null, mediaUrl: null };
-  }
-
-  // Use openrouter/free router first (auto-picks available free model), then specific fallbacks
-  const isMultimodal = (mediaType === "image" || mediaType === "audio") && mediaUrl;
-  const models = isMultimodal
-    ? [
-        "google/gemma-4-31b-it:free",
-        "nvidia/nemotron-nano-12b-v2-vl:free",
-        "google/gemma-3-27b-it:free",
-        "google/gemma-4-26b-a4b-it:free",
-      ]
-    : [
-        "openrouter/free",
-        "google/gemma-4-31b-it:free",
-        "nvidia/nemotron-3-super-120b-a12b:free",
-        "openai/gpt-oss-120b:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemma-4-26b-a4b-it:free",
-        "minimax/minimax-m2.5:free",
-        "qwen/qwen3-next-80b-a3b-instruct:free",
-      ];
-
+  // Try Lovable AI Gateway first (reliable), then OpenRouter free models as fallback
   let aiReply: string | null = null;
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
-  for (const model of models) {
+  // --- PRIMARY: Lovable AI Gateway ---
+  if (LOVABLE_API_KEY) {
     try {
-      console.log(`Trying model: ${model}`);
+      console.log("Trying Lovable AI Gateway");
+      // For multimodal, strip non-text content for Lovable AI
+      const lovableMessages = chatMessages.map((m: any) => {
+        if (Array.isArray(m.content)) {
+          const textParts = m.content.filter((p: any) => p.type === "text");
+          return { ...m, content: textParts.map((p: any) => p.text).join(" ") };
+        }
+        return m;
+      });
 
-      // For audio: if model doesn't support input_audio, fallback to text-only
-      let messagesToSend = chatMessages;
-      if (mediaType === "audio" && !model.includes("multimodal")) {
-        messagesToSend = chatMessages.map(m => {
-          if (Array.isArray(m.content)) {
-            const textParts = m.content.filter((p: any) => p.type === "text");
-            return { ...m, content: textParts.map((p: any) => p.text).join(" ") + "\n(العميل بعت رسالة صوتية مش قادر اسمعها، ردي عليه بناء على سياق المحادثة)" };
-          }
-          return m;
-        });
-      }
-
-      const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "https://sityai.lovable.app",
-          "X-Title": "Sity Cloud Bot",
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
         },
         body: JSON.stringify({
-          model,
-          messages: messagesToSend,
+          model: "google/gemini-2.5-flash",
+          messages: lovableMessages,
           max_tokens: 200,
           temperature: 0.6,
         }),
       });
 
-      if (!aiResponse.ok) {
-        console.error(`Model ${model} error: ${aiResponse.status}`);
-        continue;
-      }
-
-      const aiData = await aiResponse.json();
-      aiReply = aiData.choices?.[0]?.message?.content;
-      if (aiReply) {
-        console.log(`Success with model: ${model}`);
-        break;
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json();
+        aiReply = aiData.choices?.[0]?.message?.content;
+        if (aiReply) console.log("Success with Lovable AI Gateway");
+      } else {
+        const status = aiResponse.status;
+        console.error(`Lovable AI error: ${status}`);
+        if (status === 429 || status === 402) {
+          console.log("Lovable AI rate limited, falling back to OpenRouter");
+        }
       }
     } catch (e) {
-      console.error(`Model ${model} exception:`, e);
-      continue;
+      console.error("Lovable AI exception:", e);
+    }
+  }
+
+  // --- FALLBACK: OpenRouter free models ---
+  if (!aiReply && OPENROUTER_API_KEY) {
+    const models = [
+      "google/gemma-4-31b-it:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "openai/gpt-oss-120b:free",
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "google/gemma-4-26b-a4b-it:free",
+      "minimax/minimax-m2.5:free",
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+    ];
+
+    for (const model of models) {
+      try {
+        console.log(`Trying OpenRouter: ${model}`);
+        let messagesToSend = chatMessages;
+        if (mediaType === "audio" && !model.includes("multimodal")) {
+          messagesToSend = chatMessages.map((m: any) => {
+            if (Array.isArray(m.content)) {
+              const textParts = m.content.filter((p: any) => p.type === "text");
+              return { ...m, content: textParts.map((p: any) => p.text).join(" ") + "\n(العميل بعت رسالة صوتية)" };
+            }
+            return m;
+          });
+        }
+
+        const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            "HTTP-Referer": "https://sityai.lovable.app",
+          },
+          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 200, temperature: 0.6 }),
+        });
+
+        if (!aiResponse.ok) { console.error(`${model}: ${aiResponse.status}`); continue; }
+        const aiData = await aiResponse.json();
+        aiReply = aiData.choices?.[0]?.message?.content;
+        if (aiReply) { console.log(`Success: ${model}`); break; }
+      } catch (e) { console.error(`${model} error:`, e); continue; }
     }
   }
 
