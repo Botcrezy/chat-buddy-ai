@@ -324,6 +324,7 @@ async function startSocket() {
             addLog('info', `🎤 Audio downloaded: ${buffer.length} bytes`);
           } catch (e) {
             addLog('error', 'Audio download error', e.message);
+            textContent = 'رسالة صوتية';
           }
         } else if (msg.message.videoMessage) {
           textContent = msg.message.videoMessage.caption || '';
