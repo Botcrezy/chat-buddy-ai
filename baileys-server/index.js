@@ -99,6 +99,7 @@ async function sendWebhook(data) {
     return null;
   }
   try {
+    addLog('info', `📤 Sending webhook for phone: ${data.phone}`);
     const res = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: {
@@ -107,7 +108,14 @@ async function sendWebhook(data) {
       },
       body: JSON.stringify(data),
     });
-    return await res.json();
+    const responseText = await res.text();
+    addLog('info', `📥 Webhook response: ${res.status} - ${responseText.slice(0, 300)}`);
+    try {
+      return JSON.parse(responseText);
+    } catch {
+      addLog('error', 'Webhook response not JSON', responseText.slice(0, 200));
+      return null;
+    }
   } catch (e) {
     addLog('error', 'Webhook error', e.message);
     return null;
