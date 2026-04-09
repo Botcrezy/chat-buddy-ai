@@ -247,8 +247,8 @@ ${faqText.slice(0, 1500)}
   // Build messages
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 15 messages only
-  const recentHistory = history.slice(-15);
+  // Add last 8 messages only to keep context small
+  const recentHistory = history.slice(-8);
   for (const m of recentHistory) {
     chatMessages.push({
       role: m.direction === "in" ? "user" : "assistant",
