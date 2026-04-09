@@ -311,11 +311,12 @@ ${faqText.slice(0, 2000)}
 
       if (aiResponse.ok) {
         const aiData = await aiResponse.json();
-        const rawContent = aiData.choices?.[0]?.message?.content;
-        console.log("Lovable raw content:", JSON.stringify(rawContent));
+        console.log("Lovable AI full choices:", JSON.stringify(aiData.choices).slice(0, 500));
+        const choice = aiData.choices?.[0];
+        const rawContent = choice?.message?.content ?? choice?.text ?? "";
         aiReply = rawContent || null;
         if (aiReply) console.log("Success with Lovable AI Gateway");
-        else console.error("Lovable AI: empty content");
+        else console.error("Lovable AI: empty content, finish_reason:", choice?.finish_reason);
       } else {
         const errBody = await aiResponse.text();
         console.error(`Lovable AI error ${aiResponse.status}: ${errBody.slice(0, 300)}`);
