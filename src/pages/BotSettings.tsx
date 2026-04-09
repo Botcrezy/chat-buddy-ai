@@ -39,6 +39,7 @@ export default function BotSettings() {
   const [showAddReply, setShowAddReply] = useState(false);
   const [showAddRule, setShowAddRule] = useState(false);
   const [showAddKB, setShowAddKB] = useState(false);
+  const [editingKB, setEditingKB] = useState<any>(null);
 
   useEffect(() => { fetchAll(); }, []);
 
