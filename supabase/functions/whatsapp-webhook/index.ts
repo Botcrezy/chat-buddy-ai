@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
         conversation.is_ai_active = true;
         conversation.status = "open";
       } else {
-        console.log(`AI inactive for conversation ${conversation.id}, skipping (${hoursSinceLastMsg.toFixed(1)}h since last msg, need 1h)`);
+        console.log(`AI inactive for conversation ${conversation.id}, skipping (${minsSinceLastMsg.toFixed(0)}min since last msg, need 10min)`);
       }
     }
 
