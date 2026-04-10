@@ -1,5 +1,5 @@
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
 const pino = require('pino');
@@ -31,6 +31,7 @@ let isConnecting = false;
 let reconnectAttempts = 0;
 let lastConnectionEvent = null;
 let lastRestartTime = null;
+let startTime = Date.now();
 
 // In-memory log buffer for remote debugging
 const logBuffer = [];
@@ -62,6 +63,7 @@ function getAuthInfo() {
 }
 
 function cleanupSocket() {
+  if (global._presenceInterval) { clearInterval(global._presenceInterval); global._presenceInterval = null; }
   if (sock) {
     try {
       sock.ev.removeAllListeners('connection.update');
