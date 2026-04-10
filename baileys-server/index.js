@@ -454,11 +454,18 @@ app.post('/broadcast', async (req, res) => {
 
 // API: Get status
 app.get('/status', (req, res) => {
+  const uptimeSeconds = Math.floor(process.uptime());
+  const hours = Math.floor(uptimeSeconds / 3600);
+  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
   res.json({
     connected: sock?.user ? true : false,
     phone: sock?.user?.id?.split(':')[0] || null,
     qr: qrCode || null,
     connecting: isConnecting,
+    uptime: uptimeSeconds,
+    uptime_formatted: `${hours}h ${minutes}m`,
+    reconnect_attempts: reconnectAttempts,
+    last_connection_event: lastConnectionEvent,
   });
 });
 
@@ -554,5 +561,16 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   addLog('info', `🚀 Baileys server running on port ${PORT}`);
   addLog('info', `Auth directory: ${AUTH_DIR}`);
+  startTime = Date.now();
   startSocket();
+
+  // Self-ping every 4 minutes to prevent Railway from sleeping
+  setInterval(async () => {
+    try {
+      await fetch(`http://localhost:${PORT}/`, { signal: AbortSignal.timeout(5000) });
+      addLog('info', '🏓 Self-ping OK');
+    } catch (e) {
+      addLog('warn', 'Self-ping failed', e.message);
+    }
+  }, 4 * 60 * 1000);
 });
