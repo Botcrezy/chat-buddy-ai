@@ -1,5 +1,5 @@
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore, Browsers, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
 const pino = require('pino');
@@ -31,6 +31,7 @@ let isConnecting = false;
 let reconnectAttempts = 0;
 let lastConnectionEvent = null;
 let lastRestartTime = null;
+let startTime = Date.now();
 
 // In-memory log buffer for remote debugging
 const logBuffer = [];
@@ -62,6 +63,7 @@ function getAuthInfo() {
 }
 
 function cleanupSocket() {
+  if (global._presenceInterval) { clearInterval(global._presenceInterval); global._presenceInterval = null; }
   if (sock) {
     try {
       sock.ev.removeAllListeners('connection.update');
@@ -165,8 +167,18 @@ async function startSocket() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     addLog('info', 'Auth state loaded', { authDir: AUTH_DIR, hasCredsFile: getAuthInfo().hasCreds });
 
+    let version;
+    try {
+      const versionInfo = await fetchLatestBaileysVersion();
+      version = versionInfo.version;
+      addLog('info', `Using WhatsApp version: ${version.join('.')}`);
+    } catch (e) {
+      version = [2, 3000, 1015901307];
+      addLog('warn', `Failed to fetch latest version, using fallback: ${version.join('.')}`, e.message);
+    }
+
     sock = makeWASocket({
-      version: [2, 3000, 1033893291],
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -178,7 +190,8 @@ async function startSocket() {
       syncFullHistory: false,
       markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
-      retryRequestDelayMs: 500,
+      keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 250,
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -225,7 +238,7 @@ async function startSocket() {
         await updateStatus({ status: 'disconnected' });
 
         if (shouldReconnect) {
-          const delay = Math.min(10000 * Math.pow(2, reconnectAttempts - 1), 120000);
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts - 1), 30000);
           addLog('info', `Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})...`);
           setTimeout(startSocket, delay);
         } else {
@@ -441,11 +454,18 @@ app.post('/broadcast', async (req, res) => {
 
 // API: Get status
 app.get('/status', (req, res) => {
+  const uptimeSeconds = Math.floor(process.uptime());
+  const hours = Math.floor(uptimeSeconds / 3600);
+  const minutes = Math.floor((uptimeSeconds % 3600) / 60);
   res.json({
     connected: sock?.user ? true : false,
     phone: sock?.user?.id?.split(':')[0] || null,
     qr: qrCode || null,
     connecting: isConnecting,
+    uptime: uptimeSeconds,
+    uptime_formatted: `${hours}h ${minutes}m`,
+    reconnect_attempts: reconnectAttempts,
+    last_connection_event: lastConnectionEvent,
   });
 });
 
@@ -541,5 +561,16 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   addLog('info', `🚀 Baileys server running on port ${PORT}`);
   addLog('info', `Auth directory: ${AUTH_DIR}`);
+  startTime = Date.now();
   startSocket();
+
+  // Self-ping every 4 minutes to prevent Railway from sleeping
+  setInterval(async () => {
+    try {
+      await fetch(`http://localhost:${PORT}/`, { signal: AbortSignal.timeout(5000) });
+      addLog('info', '🏓 Self-ping OK');
+    } catch (e) {
+      addLog('warn', 'Self-ping failed', e.message);
+    }
+  }, 4 * 60 * 1000);
 });
