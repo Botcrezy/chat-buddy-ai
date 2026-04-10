@@ -1,77 +1,78 @@
 
 
-# تحليل مشكلة انقطاع اتصال واتساب + خطة الحل
+# إصلاح مشاكل البوت - 6 مشاكل رئيسية
 
-## التشخيص - ليه البوت بيفصل؟
+## التشخيص
 
-بعد مراجعة اللوجات والكود، لقيت **5 أسباب رئيسية**:
+### 1. بيكرر الكلام
+- **السبب**: الـ history محدود بـ 6 رسائل فقط (سطر 363) - البوت بينسى اللي قاله قبل كده
+- **السبب التاني**: في retry attempts (سطر 418-422)، كل محاولة بتبعت context أقل - يعني لو المحاولة التانية نجحت، البوت مش شايف المحادثة السابقة أصلاً
 
-### 1. Railway بيمسح ملفات الجلسة عند كل Restart
-Railway لما بيعمل restart أو redeploy، مجلد `auth_session` بيتمسح لأنه مش persistent storage. يعني كل مرة لازم تمسح QR من جديد.
+### 2. مش ذكي
+- **السبب**: `max_tokens: 200` (سطر 436) - ده قليل جداً، البوت بيتقطع في نص الرد
+- **السبب التاني**: في سطر 415، لما بيستخدم Lovable AI، بيبعت system prompt مختصر جداً بدون بيانات التدريب أو قاعدة المعرفة - يعني البوت بيرد "من دماغه" بدون معلومات
 
-### 2. إصدار واتساب ثابت (Hardcoded)
-في الكود: `version: [2, 3000, 1033893291]` - ده إصدار ثابت ممكن يبقى قديم ويسبب handshake failures. Baileys عنده طريقة تجيب أحدث إصدار تلقائي.
+### 3. بيكرر اسم العميل
+- **السبب**: الـ contextHints بتتحط في الـ system prompt الأساسي (سطر 352) بس في الـ freshSystemMsg (سطر 415) مش بتتضمن كل التعليمات بشكل كافي، والـ AI مش بيلتزم لأن التعليمات ضعيفة
 
-### 3. Reconnect Delay كبير جداً
-الـ exponential backoff بيوصل لـ 120 ثانية (دقيقتين) - ده كتير. لو فصل، بيفضل واقف وقت طويل قبل ما يحاول يرجع.
+### 4. مش بيبحث في الإنترنت
+- **السبب**: البحث بيستخدم DuckDuckGo HTML scraping (سطر 132-149) وده غير مستقر وبيفشل كتير
+- **السبب التاني**: triggers البحث محدودة جداً (سطر 156) - لازم العميل يقول كلمة معينة زي "ابحث" أو "دور لي"
 
-### 4. مفيش Health Check يمنع Railway من النوم
-Railway ممكن ينيّم السيرفر لو مفيش traffic. محتاج self-ping كل فترة.
+### 5. مش بيذاكر البيانات التدريبية كويس
+- **السبب**: البيانات بتتقطع - knowledge محدود بـ 1500 حرف (سطر 354) والـ FAQ بـ 800 حرف (سطر 355) من أصل 250+ عنصر
+- **السبب التاني**: keyword matching بسيط جداً - بيدور على كلمات مطابقة بس، مش بيفهم المعنى
 
-### 5. Socket cleanup مش كامل
-لما الاتصال بيقفل، الـ presence interval بيفضل شغال وممكن يعمل errors.
+### 6. بيقطع كل شوية
+- تم معالجته في التحديث السابق (baileys-server stability)
 
 ---
 
 ## خطة الحل
 
-### الخطوة 1: تحسين baileys-server/index.js
-- **إزالة الإصدار الثابت** واستخدام `fetchLatestBaileysVersion()` لجلب أحدث إصدار تلقائي
-- **تقليل Reconnect Delay** من max 120s إلى max 30s، مع backoff أسرع
-- **إضافة Self-Ping** كل 4 دقائق لمنع Railway من إنهاء السيرفر
-- **تنظيف الـ presence interval** عند الـ disconnect
-- **إضافة error handling أفضل** في الـ connection.update handler
-- **إضافة WebSocket keepAliveIntervalMs** في إعدادات makeWASocket
+### التغييرات كلها في ملف واحد: `supabase/functions/whatsapp-webhook/index.ts`
 
-### الخطوة 2: إضافة Volume على Railway (تعليمات يدوية)
-هتحتاج تضيف **Persistent Volume** على Railway عشان ملفات الجلسة متتمسحش:
-- في Railway Dashboard → Settings → Volumes
-- أضف volume على path: `/app/auth_session`
-- كده حتى لو Railway عمل restart، الجلسة هتفضل محفوظة
+#### إصلاح 1: زيادة الـ History
+- من 6 رسائل لـ **15 رسالة** عشان البوت يفتكر المحادثة
+- تحسين الـ deduplication
 
-### الخطوة 3: تحسين Dashboard (Connection.tsx)
-- إضافة **Auto-reconnect button** لما السيرفر يكون متصل بس واتساب مش متصل
-- عرض **سبب الانقطاع** في الواجهة بدل مجرد "غير متصل"
-- إضافة **مؤشر uptime** واضح
+#### إصلاح 2: تحسين ذكاء البوت
+- زيادة `max_tokens` من 200 لـ **500**
+- استخدام **system prompt كامل** مع كل البيانات في كل المحاولات (مش prompt مختصر)
+- استخدام model أقوى: `google/gemini-2.5-flash` مع الـ context الكامل في كل المحاولات
+- إزالة الـ freshSystemMsg المختصر واستبداله بالـ system prompt الأصلي
+
+#### إصلاح 3: منع تكرار الاسم
+- تعزيز التعليمات في الـ system prompt بشكل أوضح وأقوى
+- إضافة check: لو الاسم موجود في آخر 3 ردود AI، يتم إضافة تعليمة صريحة "ممنوع تذكري اسمه تاني"
+
+#### إصلاح 4: تحسين البحث في الإنترنت
+- استبدال DuckDuckGo HTML scraping بـ **API بحث أفضل** (DuckDuckGo API endpoint أو Google Custom Search)
+- توسيع triggers البحث لتشمل أي سؤال مش موجود في قاعدة المعرفة
+- تفعيل البحث تلقائياً لما الـ knowledge score يكون صفر
+
+#### إصلاح 5: تحسين استخدام البيانات التدريبية
+- زيادة حد الـ knowledge من 1500 لـ **3000 حرف**
+- زيادة حد الـ FAQ من 800 لـ **1500 حرف**
+- زيادة عدد النتائج المطابقة من 8 لـ **12** FAQ و من 10 لـ **15** knowledge
+- تحسين الـ scoring: إضافة **fuzzy matching** (كلمات متشابهة) بدل exact match فقط
 
 ---
 
 ## التفاصيل التقنية
 
-### ملف: `baileys-server/index.js`
 ```text
-التغييرات:
-1. استبدال version الثابت بـ fetchLatestBaileysVersion()
-2. تقليل max reconnect delay من 120s لـ 30s  
-3. إضافة keepAliveIntervalMs: 30000 في إعدادات الـ socket
-4. إضافة self-ping interval كل 4 دقائق
-5. تنظيف presence interval في cleanupSocket()
-6. إضافة retryRequestDelayMs: 250 (أسرع)
+ملف: supabase/functions/whatsapp-webhook/index.ts
+
+1. سطر 247: history limit من 30 → 40
+2. سطر 264: FAQ slice من 8 → 12  
+3. سطر 279: knowledge slice من 10 → 15
+4. سطر 354: knowledgeText.slice من 1500 → 3000
+5. سطر 355: faqText.slice من 800 → 1500
+6. سطر 363: recentHistory من slice(-6) → slice(-15)
+7. سطر 415-422: إزالة freshSystemMsg واستخدام systemPrompt الكامل في كل المحاولات
+8. سطر 436: max_tokens من 200 → 500
+9. سطر 130-161: تحسين webSearch function وتوسيع triggers
+10. إضافة fuzzy keyword matching في scoring
 ```
-
-### ملف: `src/pages/Connection.tsx`
-```text
-التغييرات:
-1. عرض uptime بشكل أوضح (ساعات ودقائق مش ثواني)
-2. عرض عدد محاولات الـ reconnect
-3. إضافة تنبيه لما السيرفر يكون شغال بس واتساب مفصول
-```
-
----
-
-## ملاحظة مهمة
-بعد ما أعدّل الملفات، هتحتاج:
-1. **ترفع `baileys-server/index.js` الجديد** على Railway
-2. **تضيف Volume** من Railway Dashboard على path `/app/auth_session`
-3. **تمسح QR Code** مرة واحدة بعد التحديث
 
