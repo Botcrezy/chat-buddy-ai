@@ -266,8 +266,39 @@ export default function Connection() {
           <CardContent className="space-y-3">
             <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-lg font-mono" dir="ltr">
               {serverUrl}
-              {serverInfo && ` | uptime: ${Math.floor(serverInfo.uptime || 0)}s | connected: ${String(serverInfo.connected)}`}
             </div>
+            {serverInfo && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-muted/30 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground">Uptime</p>
+                  <p className="text-sm font-bold" dir="ltr">
+                    {serverInfo.uptime ? `${Math.floor(serverInfo.uptime / 3600)}h ${Math.floor((serverInfo.uptime % 3600) / 60)}m` : '—'}
+                  </p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground">واتساب</p>
+                  <p className={`text-sm font-bold ${serverInfo.connected ? 'text-emerald-600' : 'text-destructive'}`}>
+                    {serverInfo.connected ? '✅ متصل' : '❌ مفصول'}
+                  </p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground">محاولات</p>
+                  <p className="text-sm font-bold">{serverInfo.reconnect_attempts || 0}</p>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-muted-foreground">ملفات Auth</p>
+                  <p className="text-sm font-bold">{serverInfo.auth_file_count || 0} {serverInfo.has_auth_files ? '🔑' : '⚠️'}</p>
+                </div>
+              </div>
+            )}
+            {serverStatus === "online" && serverInfo && !serverInfo.connected && !isWaitingQR && (
+              <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-700 text-sm">
+                  السيرفر شغال لكن واتساب مش متصل. جرب "إعادة تعيين الجلسة" وامسح QR من جديد.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="flex gap-2 flex-wrap">
               <Button variant="outline" size="sm" onClick={restartServer} disabled={restarting} className="gap-1">
                 {restarting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
