@@ -167,8 +167,18 @@ async function startSocket() {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     addLog('info', 'Auth state loaded', { authDir: AUTH_DIR, hasCredsFile: getAuthInfo().hasCreds });
 
+    let version;
+    try {
+      const versionInfo = await fetchLatestBaileysVersion();
+      version = versionInfo.version;
+      addLog('info', `Using WhatsApp version: ${version.join('.')}`);
+    } catch (e) {
+      version = [2, 3000, 1015901307];
+      addLog('warn', `Failed to fetch latest version, using fallback: ${version.join('.')}`, e.message);
+    }
+
     sock = makeWASocket({
-      version: [2, 3000, 1033893291],
+      version,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -180,7 +190,8 @@ async function startSocket() {
       syncFullHistory: false,
       markOnlineOnConnect: true,
       connectTimeoutMs: 60000,
-      retryRequestDelayMs: 500,
+      keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 250,
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -227,7 +238,7 @@ async function startSocket() {
         await updateStatus({ status: 'disconnected' });
 
         if (shouldReconnect) {
-          const delay = Math.min(10000 * Math.pow(2, reconnectAttempts - 1), 120000);
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts - 1), 30000);
           addLog('info', `Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})...`);
           setTimeout(startSocket, delay);
         } else {
