@@ -126,10 +126,33 @@ Deno.serve(async (req) => {
   }
 });
 
-// ===== Web Search =====
+// ===== Web Search (improved - multiple methods) =====
 async function webSearch(query: string): Promise<string> {
+  // Try DuckDuckGo API first (more reliable than HTML scraping)
   try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query + " site:sity.cloud OR Sity Cloud")}`;
+    const apiUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const res = await fetch(apiUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SityBot/1.0)" },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const results: string[] = [];
+      if (data.Abstract) results.push(data.Abstract);
+      if (data.Answer) results.push(data.Answer);
+      if (data.RelatedTopics) {
+        for (const topic of data.RelatedTopics.slice(0, 3)) {
+          if (topic.Text) results.push(topic.Text);
+        }
+      }
+      if (results.length > 0) return results.join("\n").slice(0, 1000);
+    }
+  } catch (e) {
+    console.error("DuckDuckGo API error:", e);
+  }
+
+  // Fallback: HTML scraping
+  try {
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; SityBot/1.0)" },
     });
@@ -138,32 +161,39 @@ async function webSearch(query: string): Promise<string> {
     const snippets: string[] = [];
     const regex = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
     let match;
-    while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+    while ((match = regex.exec(html)) !== null && snippets.length < 4) {
       const text = match[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
       if (text.length > 20) snippets.push(text);
     }
-    return snippets.join("\n");
+    return snippets.join("\n").slice(0, 1000);
   } catch (e) {
-    console.error("Web search error:", e);
+    console.error("Web search fallback error:", e);
     return "";
   }
 }
 
-// ===== Detect if message needs web search =====
-function needsWebSearch(msg: string, knowledgeText: string): boolean {
+// ===== Detect if message needs web search (expanded triggers) =====
+function needsWebSearch(msg: string, knowledgeScore: number): boolean {
   if (!msg) return false;
-  const searchTriggers = ["ابحث", "دور لي", "اعرف لي", "هل فيه", "ايه اخبار", "ايه الجديد", "قارن", "الفرق بين"];
+  const searchTriggers = [
+    "ابحث", "دور لي", "اعرف لي", "هل فيه", "ايه اخبار", "ايه الجديد",
+    "قارن", "الفرق بين", "ابحثي", "دوري", "اعرفيلي", "عايز اعرف",
+    "ممكن تدوري", "بحث", "search", "find", "google",
+    "ايه رأيك في", "عايزة أعرف", "سمعت ان", "هل صحيح",
+  ];
+  const lower = msg.toLowerCase();
   for (const t of searchTriggers) {
-    if (msg.includes(t)) return true;
+    if (lower.includes(t)) return true;
   }
-  if (msg.includes("؟") && knowledgeText.length < 100) return true;
+  // Auto-search if question mark present and no good knowledge match
+  if (msg.includes("؟") && knowledgeScore < 2) return true;
+  if (msg.endsWith("?") && knowledgeScore < 2) return true;
   return false;
 }
 
 // ===== Detect escalation request (STRICT) =====
 function isEscalationRequest(msg: string): boolean {
   if (!msg) return false;
-  // Only EXPLICIT human support requests - not vague phrases
   const triggers = [
     "دعم بشري", "كلمني بحد", "عايز اكلم حد بشري", "عايز حد بشري",
     "حد من الفريق يكلمني", "ابعتلي حد من الفريق",
@@ -186,6 +216,34 @@ function isAbusiveMessage(msg: string): boolean {
   return abuseWords.some(w => lower.includes(w));
 }
 
+// ===== Fuzzy keyword matching =====
+function fuzzyScore(msgWords: string[], text: string): number {
+  const textLower = text.toLowerCase();
+  const textWords = textLower.split(/\s+/).filter(w => w.length > 2);
+  let score = 0;
+  
+  for (const word of msgWords) {
+    // Exact match = 3 points
+    if (textLower.includes(word)) {
+      score += 3;
+      continue;
+    }
+    // Partial match (word starts with or contains) = 1 point
+    for (const tw of textWords) {
+      if (tw.startsWith(word) || word.startsWith(tw)) {
+        score += 1;
+        break;
+      }
+      // Arabic root similarity - share 3+ char prefix
+      if (word.length >= 3 && tw.length >= 3 && word.slice(0, 3) === tw.slice(0, 3)) {
+        score += 0.5;
+        break;
+      }
+    }
+  }
+  return score;
+}
+
 // ===== AI Reply Generation =====
 async function generateAIReply(
   supabase: any, conversation: any, contact: any,
@@ -197,7 +255,7 @@ async function generateAIReply(
     .limit(1)
     .single();
 
-  // Check escalation FIRST - return immediately, no AI reply after this
+  // Check escalation FIRST
   if (isEscalationRequest(message)) {
     const escalationReply = "تمام هحولك لحد من الفريق يكلمك، حد هيرد عليك في أقرب وقت";
 
@@ -222,7 +280,7 @@ async function generateAIReply(
     return { reply: escalationReply, mediaUrl: null };
   }
 
-  // Check for abuse BEFORE generating AI reply
+  // Check for abuse
   if (isAbusiveMessage(message)) {
     const warningReply = "حضرتك لو سمحت نلتزم بأدب الحوار، إحنا هنا عشان نساعدك. لو فيه مشكلة حقيقية قولي وأنا هحاول أحلها معاك";
     
@@ -244,7 +302,7 @@ async function generateAIReply(
     supabase.from("training_data").select("question, answer, category").eq("is_active", true),
     supabase.from("knowledge_base").select("title, content, category, data_type, media_url, media_type").eq("is_active", true),
     supabase.from("customer_memory").select("memory_type, key, value").eq("contact_id", contact.id).order("created_at", { ascending: false }).limit(20),
-    supabase.from("messages").select("content, direction, sender_type, media_type").eq("conversation_id", conversation.id).order("created_at", { ascending: true }).limit(30),
+    supabase.from("messages").select("content, direction, sender_type, media_type").eq("conversation_id", conversation.id).order("created_at", { ascending: true }).limit(40),
   ]);
 
   const trainingData = trainingRes.data || [];
@@ -252,16 +310,16 @@ async function generateAIReply(
   const memories = memoryRes.data || [];
   const history = historyRes.data || [];
 
-  // Build KEYWORD-MATCHED training context
+  // Build FUZZY-MATCHED training context
   const msgLower = (message || "").toLowerCase();
   const msgWords = msgLower.split(/\s+/).filter(w => w.length > 2);
 
-  // Score and pick top relevant FAQ entries
+  // Score and pick top relevant FAQ entries with fuzzy matching
   let scoredFaq = trainingData.map((t: any) => {
-    const combined = `${t.question} ${t.answer}`.toLowerCase();
-    const score = msgWords.filter(w => combined.includes(w)).length;
+    const combined = `${t.question} ${t.answer}`;
+    const score = fuzzyScore(msgWords, combined);
     return { ...t, score };
-  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
+  }).filter(t => t.score > 0).sort((a, b) => b.score - a.score).slice(0, 12);
 
   if (scoredFaq.length === 0 && trainingData.length > 0) {
     scoredFaq = trainingData.slice(0, 5);
@@ -269,14 +327,16 @@ async function generateAIReply(
   }
   const faqText = scoredFaq.map((t: any) => `س: ${t.question}\nج: ${t.answer}`).join("\n");
 
-  // Score and pick top relevant knowledge entries
+  // Score and pick top relevant knowledge entries with fuzzy matching
   let scoredKnowledge = knowledgeData
     .filter((k: any) => k.data_type !== "image")
     .map((k: any) => {
-      const combined = `${k.title} ${k.content}`.toLowerCase();
-      const score = msgWords.filter(w => combined.includes(w)).length;
+      const combined = `${k.title} ${k.content}`;
+      const score = fuzzyScore(msgWords, combined);
       return { ...k, score };
-    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
+    }).filter(k => k.score > 0).sort((a, b) => b.score - a.score).slice(0, 15);
+
+  const topKnowledgeScore = scoredKnowledge.length > 0 ? scoredKnowledge[0].score : 0;
 
   if (scoredKnowledge.length === 0 && knowledgeData.length > 0) {
     scoredKnowledge = knowledgeData.filter((k: any) => k.data_type !== "image").slice(0, 5);
@@ -298,16 +358,23 @@ async function generateAIReply(
   const hasHistory = history.length > 2;
   const isFirstMessage = history.length <= 1;
 
-  // Build smart context hints - NEVER repeat customer name after first message
+  // Check if name was used in recent AI replies (prevent repetition)
+  const recentAiReplies = history.filter(m => m.direction === "out" && m.sender_type === "ai").slice(-3);
+  const nameUsedRecently = recentAiReplies.some(m => m.content && m.content.includes(contactName));
+
+  // Build smart context hints
   let contextHints = "";
   if (isShortMsg && hasHistory) {
     contextHints += "\nدي رسالة متابعة - كملي طبيعي ومتقوليش أهلاً ومتسأليش ازاي اساعدك ومتقوليش اسمه.";
   }
-  if (isFirstMessage) {
+  if (isFirstMessage && !nameUsedRecently) {
     contextHints += `\nأول رسالة من العميل اسمه ${contactName} - رحبي مرة واحدة بس ومتكرريش اسمه بعد كده خالص.`;
   }
   if (hasHistory && !isFirstMessage) {
-    contextHints += "\nممنوع تقولي اسم العميل تاني - انتي عارفاه خلاص.";
+    contextHints += "\nممنوع تقولي اسم العميل تاني - انتي عارفاه خلاص. متقوليش اسمه نهائي.";
+  }
+  if (nameUsedRecently) {
+    contextHints += `\nتحذير صريح: اسم العميل "${contactName}" اتذكر قبل كده - ممنوع تذكريه تاني نهائياً في الرد ده.`;
   }
 
   // Handle media descriptions
@@ -319,13 +386,12 @@ async function generateAIReply(
     mediaDescription = "\n(العميل بعت رسالة صوتية - حاولي تفهميها أو اسأليه يكتبلك)";
   }
 
-  // Web search if needed
+  // Web search if needed (use knowledge score for auto-trigger)
   let searchResults = "";
-  const allKnowledge = knowledgeData.map((k: any) => `${k.title} ${k.content}`).join(" ");
-  if (needsWebSearch(message, allKnowledge)) {
+  if (needsWebSearch(message, topKnowledgeScore)) {
     searchResults = await webSearch(message);
     if (searchResults) {
-      searchResults = `\nنتائج بحث:\n${searchResults}`;
+      searchResults = `\nنتائج بحث من الإنترنت:\n${searchResults}`;
     }
   }
 
@@ -338,10 +404,14 @@ async function generateAIReply(
 - لو العميل متضايق أو زعلان خففي عليه وهزري معاه شوية بذوق
 - لو العميل سأل سؤال تقني أو عن خدمة، ردي بمعلومات دقيقة ومفصلة من البيانات اللي عندك
 - لو مش لاقية معلومة محددة، حاولي تساعدي من اللي تعرفيه واعرضي تسأليله
-- متكرريش اسم العميل في كل رسالة - استخدميه مرة واحدة بس في أول تعارف
 - ممنوع ايموجي نهائيا
 - ممنوع تقولي انك ذكاء اصطناعي أو بوت
 - لو فيه صورة مناسبة من البيانات حطي [IMAGE:الرابط]
+
+قاعدة الاسم (مهمة جداً):
+- ممنوع تذكري اسم العميل إلا لو دي أول مرة تتكلمي معاه
+- لو ذكرتي اسمه قبل كده في أي رسالة سابقة، ممنوع تقوليه تاني نهائياً
+- استخدمي "حضرتك" أو كلمي من غير مناداة بالاسم
 
 قواعد الرد:
 - رد مختصر من جملة لـ 4 جمل حسب السؤال
@@ -349,25 +419,26 @@ async function generateAIReply(
 - متقوليش "خليني اتاكد وارجعلك" - دايما حاولي تساعدي من المعلومات المتاحة
 - لو مفيش معلومة دقيقة قولي "مش متأكدة من التفاصيل دي بس خليني اسألك الفريق" بدل متجمدي
 - ممنوع ترسلي رسائل طويلة أو تشرحي شرح زيادة عن اللزوم
+- ممنوع تكرري نفس الكلام أو نفس الجمل اللي قلتيها قبل كده
 ${contextHints}${mediaDescription}
 ${memoryText ? `\nمعلومات عن العميل: ${memoryText}` : ""}${searchResults}
-${knowledgeText ? `\nمعلومات عن خدماتنا:\n${knowledgeText.slice(0, 1500)}` : ""}
-${faqText ? `\nأسئلة شائعة:\n${faqText.slice(0, 800)}` : ""}
-${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`;
+${knowledgeText ? `\nمعلومات عن خدماتنا:\n${knowledgeText.slice(0, 3000)}` : ""}
+${faqText ? `\nأسئلة شائعة:\n${faqText.slice(0, 1500)}` : ""}
+${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 500)}` : ""}`;
 
   // Build messages
   console.log(`System prompt length: ${systemPrompt.length}`);
   const chatMessages: any[] = [{ role: "system", content: systemPrompt }];
 
-  // Add last 6 messages, deduplicate
-  const recentHistory = history.slice(-6);
+  // Add last 15 messages for better context
+  const recentHistory = history.slice(-15);
   const seenContents = new Set<string>();
   let lastRole = "system";
   for (const m of recentHistory) {
     const role = m.direction === "in" ? "user" : "assistant";
     let content = m.content || (m.media_type === "image" ? "صورة" : "رسالة صوتية");
-    if (content.length > 200) content = content.slice(0, 200);
-    const contentKey = content.slice(0, 50);
+    if (content.length > 300) content = content.slice(0, 300);
+    const contentKey = content.slice(0, 60);
     if (seenContents.has(contentKey)) continue;
     seenContents.add(contentKey);
     if (role === lastRole && chatMessages.length > 1) {
@@ -412,13 +483,11 @@ ${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`
       return m;
     });
 
-    const freshSystemMsg = { role: "system", content: `انتي ${botName} من Sity Cloud. ردي بالمصري العامي بشكل طبيعي وذكي. ممنوع ايموجي. ممنوع تتكلمي كروبوت. ردي زي الإنسان بالظبط.${contextHints}${mediaDescription}` };
-    const userMsg = lovableMessages[lovableMessages.length - 1];
-
+    // All attempts use FULL system prompt with all training data
     const attempts = [
       { msgs: lovableMessages, model: "google/gemini-2.5-flash" },
-      { msgs: [lovableMessages[0], ...lovableMessages.slice(-3)], model: "google/gemini-2.5-flash" },
-      { msgs: [freshSystemMsg, userMsg], model: "google/gemini-2.5-flash-lite" },
+      { msgs: [lovableMessages[0], ...lovableMessages.slice(-5)], model: "google/gemini-2.5-flash" },
+      { msgs: [lovableMessages[0], lovableMessages[lovableMessages.length - 1]], model: "google/gemini-2.5-flash" },
     ];
 
     for (const attempt of attempts) {
@@ -433,7 +502,7 @@ ${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`
           body: JSON.stringify({
             model: attempt.model,
             messages: attempt.msgs,
-            max_tokens: 200,
+            max_tokens: 500,
             temperature: 0.8,
           }),
         });
@@ -490,7 +559,7 @@ ${imageKnowledge ? `\nصور متاحة: ${imageKnowledge.slice(0, 400)}` : ""}`
             Authorization: `Bearer ${OPENROUTER_API_KEY}`,
             "HTTP-Referer": "https://sityai.lovable.app",
           },
-          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 200, temperature: 0.8 }),
+          body: JSON.stringify({ model, messages: messagesToSend, max_tokens: 500, temperature: 0.8 }),
         });
 
         if (!aiResponse.ok) { console.error(`${model}: ${aiResponse.status}`); continue; }
@@ -557,36 +626,28 @@ function cleanAIReply(reply: string): string {
   const cleanLines = lines.filter(line => {
     const t = line.trim();
     if (!t) return false;
-    // Filter out internal reasoning/analysis lines
     if (/^(العميل |لازم |أولا|ثانيا|ملاحظة|السيناريو|التعليمات|بيانات التدريب|لقيت|أتحقق|أبدأ|أذكر|أكتفي|ده يتوافق|المطلوب|الخطوة|بناء على|حسب ال|من خلال ال|هنا |أولاً|ثانياً|Note:|Analysis:|Reasoning:|Step |First|Then|Based on)/i.test(t)) return false;
     if (/^\[(?!IMAGE|ESCALATE)[^\]]*\]/.test(t)) return false;
     if (/^(The customer|I need|I should|Let me|I will|According|Based on|Looking at|This is|My response|Response:)/i.test(t)) return false;
-    // Filter out category tags
     if (/^\[(pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب|سيناريو)\]/i.test(t)) return false;
     return true;
   });
 
   reply = cleanLines.join("\n").trim();
-  // Remove inline category tags
   reply = reply.replace(/\[(?:pricing|scenarios|features|about|faq|expert|security|support|websites|خدمات|تقنية|عام|تدريب|سيناريو)\]\s*/gi, "").trim();
-  // Remove English reasoning lines
   reply = reply.replace(/\n\s*(Also|Note|However|But|So |This |I |We |The |Let|Now|Based|According|There|Here|First|Then)[^\n]*/gi, "").trim();
-  // Remove emojis
   reply = reply.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/gu, "").trim();
-  // Remove markdown bold
   reply = reply.replace(/\*+/g, "").trim();
-  // Convert markdown links [text](url) to just url (WhatsApp doesn't support markdown links)
   reply = reply.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, "$2").trim();
-  // Remove remaining markdown formatting
   reply = reply.replace(/[_~`#>]/g, "").trim();
 
-  // Trim overly long responses
-  if (reply.length > 400) {
+  // Trim overly long responses (increased limit)
+  if (reply.length > 600) {
     const sentences = reply.split(/[.،؟!]\s*/);
     let result = "";
     for (const s of sentences) {
       if (!s.trim()) continue;
-      if ((result + s).length > 350) break;
+      if ((result + s).length > 500) break;
       result += (result ? "، " : "") + s;
     }
     if (result.length > 20) reply = result;
@@ -611,7 +672,6 @@ async function notifyAdmin(supabase: any, customerName: string, customerPhone: s
     const serverUrl = botSettings?.baileys_server_url;
     if (!serverUrl) return;
 
-    // Format phone with + for admin readability
     const formattedPhone = customerPhone.startsWith("+") ? customerPhone : `+${customerPhone}`;
     const adminMsg = `تنبيه - طلب دعم بشري\n\nالعميل: ${customerName}\nالرقم: ${formattedPhone}\nالرسالة: ${customerMessage}`;
 
